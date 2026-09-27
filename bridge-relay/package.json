@@ -1,0 +1,10 @@
+{
+  "name": "infera-bridge-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Reference cloud relay that lets cloud-hosted Infera Agent sessions drive a paired browser",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "ws": "^8.18.0" },
+  "engines": { "node": ">=18" }
+}

@@ -1,0 +1,7 @@
+{
+  "extName": { "message": "Infera Agent" },
+  "extDescription": { "message": "Infera Agent in your browser: a browsing agent that reads pages, clicks, types, fills forms and automates any website with natural language." },
+  "actionTitle": { "message": "Open Infera Agent" },
+  "cmdOpen": { "message": "Open the Infera Agent side panel" },
+  "cmdStop": { "message": "Stop the running Infera Agent task" }
+}

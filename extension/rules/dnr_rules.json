@@ -1,0 +1,16 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [
+        { "header": "X-Infera-Client", "operation": "set", "value": "infera-agent-chrome/1.0.0" }
+      ]
+    },
+    "condition": {
+      "requestDomains": ["infera.ai", "infera.app"],
+      "resourceTypes": ["xmlhttprequest", "websocket", "other"]
+    }
+  }
+]

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Infera Agent</title>
+  <link rel="stylesheet" href="../lib/theme.css">
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header class="top">
+    <img src="../icons/icon48.png" alt="" class="logo">
+    <div class="brand grow">
+      <strong data-i18n="appName">Infera Agent</strong>
+      <span id="status" class="status"></span>
+    </div>
+    <button class="icon-btn" id="btnNew" data-i18n-title="newChat">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+    <button class="icon-btn" id="btnHistory" data-i18n-title="history">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 3"/></svg>
+    </button>
+    <button class="icon-btn" id="btnShortcuts" data-i18n-title="shortcuts">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 20 15 4"/><rect x="3" y="3" width="18" height="18" rx="4"/></svg>
+    </button>
+    <button class="icon-btn" id="btnTasks" data-i18n-title="scheduled">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+    </button>
+    <button class="icon-btn" id="btnRecord" data-i18n-title="record">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4" fill="currentColor"/></svg>
+    </button>
+    <button class="icon-btn" id="btnSettings" data-i18n-title="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="19" r="1.3"/></svg>
+    </button>
+  </header>
+
+  <main id="messages" class="messages" aria-live="polite"></main>
+
+  <section id="empty" class="empty">
+    <img src="../icons/logo.png" alt="" class="hero">
+    <h2 data-i18n="emptyTitle"></h2>
+    <p class="muted" data-i18n="emptyHint"></p>
+    <div class="examples">
+      <button class="chip" data-i18n="ex1"></button>
+      <button class="chip" data-i18n="ex2"></button>
+      <button class="chip" data-i18n="ex3"></button>
+      <button class="chip" data-i18n="ex4"></button>
+    </div>
+    <div id="noKey" class="notice" hidden>
+      <span data-i18n="noKey"></span>
+      <button class="btn small" id="btnOpenSettings" data-i18n="openSettings"></button>
+    </div>
+  </section>
+
+  <footer class="composer">
+    <div id="slashMenu" class="slash-menu" hidden></div>
+    <div id="attachments" class="attachments"></div>
+    <div class="input-wrap card">
+      <textarea id="input" rows="2" data-i18n-placeholder="placeholder"></textarea>
+      <div class="input-bar">
+        <button class="icon-btn" id="btnAttach" data-i18n-title="attach">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="3"/><circle cx="12" cy="12" r="3.2"/></svg>
+        </button>
+        <select id="modelSel" class="mini-select" data-i18n-title="model"></select>
+        <select id="modeSel" class="mini-select" data-i18n-title="mode"></select>
+        <span class="grow"></span>
+        <button class="send" id="btnSend" data-i18n-title="send">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+        </button>
+        <button class="send stop" id="btnStop" data-i18n-title="stop" hidden>
+          <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+        </button>
+      </div>
+    </div>
+    <p class="footnote muted" data-i18n="injection"></p>
+  </footer>
+
+  <aside id="drawer" class="drawer" hidden>
+    <div class="drawer-head">
+      <strong id="drawerTitle"></strong>
+      <button class="icon-btn" id="drawerClose" data-i18n-title="close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div id="drawerBody" class="drawer-body"></div>
+  </aside>
+
+  <dialog id="captureDlg" class="capture">
+    <p class="muted" data-i18n="captureRegion"></p>
+    <div class="capture-stage"><img id="captureImg" alt=""><div id="captureSel" class="sel" hidden></div></div>
+    <div class="row" style="justify-content:flex-end;margin-top:10px">
+      <button class="btn" id="capCancel" data-i18n="cancel"></button>
+      <button class="btn" id="capFull" data-i18n="useFull"></button>
+      <button class="btn primary" id="capRegion" data-i18n="useRegion"></button>
+    </div>
+  </dialog>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>

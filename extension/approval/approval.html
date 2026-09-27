@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Infera Agent — approval</title>
+  <link rel="stylesheet" href="../lib/theme.css">
+  <style>
+    body { padding: 18px; }
+    .head { display: flex; gap: 10px; align-items: center; font-weight: 700; font-size: 15px; }
+    .head img { width: 28px; height: 28px; }
+    .site { margin: 12px 0 4px; font-weight: 650; }
+    .desc { white-space: pre-wrap; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; font-size: 13.5px; max-height: 170px; overflow: auto; }
+    .reason { margin-top: 8px; font-size: 12.5px; background: var(--warn-soft); color: var(--warn); padding: 7px 9px; border-radius: 9px; }
+    .client { font-size: 12px; margin-top: 6px; }
+    .actions { display: grid; gap: 8px; margin-top: 14px; }
+  </style>
+</head>
+<body>
+  <div class="head"><img src="../icons/icon48.png" alt=""><span id="title"></span></div>
+  <div class="site" id="site"></div>
+  <div class="desc" id="desc"></div>
+  <div class="reason" id="reason" hidden></div>
+  <div class="client muted" id="client"></div>
+  <div class="actions">
+    <button class="btn primary" id="once"></button>
+    <button class="btn" id="always" hidden></button>
+    <button class="btn danger" id="deny"></button>
+  </div>
+  <script type="module" src="approval.js"></script>
+</body>
+</html>

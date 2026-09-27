@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blocked by Infera Agent</title>
+  <link rel="stylesheet" href="../lib/theme.css">
+  <style>
+    body { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+    .box { max-width: 520px; text-align: center; padding: 32px 28px; }
+    .box img { width: 64px; height: 64px; }
+    h1 { font-size: 20px; margin: 14px 0 6px; }
+    .url { font-family: var(--mono); font-size: 12.5px; word-break: break-all; background: var(--surface-2); border-radius: 8px; padding: 6px 10px; margin: 12px 0; }
+  </style>
+</head>
+<body>
+  <div class="card box">
+    <img src="../icons/logo.png" alt="">
+    <h1 id="h"></h1>
+    <p class="muted" id="p"></p>
+    <div class="url" id="url"></div>
+    <p class="muted" id="reason"></p>
+  </div>
+  <script src="blocked.js"></script>
+</body>
+</html>

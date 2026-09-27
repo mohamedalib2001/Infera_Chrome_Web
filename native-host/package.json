@@ -1,0 +1,17 @@
+{
+  "name": "infera-agent-native-host",
+  "version": "1.0.0",
+  "description": "Native messaging host and MCP server (infera-in-chrome) for the Infera Agent browser extension",
+  "license": "UNLICENSED",
+  "private": true,
+  "bin": {
+    "infera-native-host": "infera-native-host.js",
+    "infera-mcp-server": "infera-mcp-server.js"
+  },
+  "scripts": {
+    "install-host": "node install.js",
+    "uninstall-host": "node install.js --uninstall",
+    "test": "node test/bridge.test.js"
+  },
+  "engines": { "node": ">=18" }
+}

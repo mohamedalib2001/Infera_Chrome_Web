@@ -1,0 +1,74 @@
+// UI strings (Arabic / English). Language: settings.language or browser locale.
+const STR = {
+  en: {
+    appName: 'Infera Agent',
+    newChat: 'New chat', history: 'History', shortcuts: 'Shortcuts', scheduled: 'Scheduled tasks', record: 'Record workflow', settings: 'Settings',
+    placeholder: 'Ask Infera to do something on this page… (type / for shortcuts)',
+    send: 'Send', stop: 'Stop', attach: 'Attach a screenshot of this tab', emptyTitle: 'What should Infera do?',
+    emptyHint: 'Infera can read this page, click, type, fill forms, and work across tabs using your signed-in sessions. You can watch every step and stop at any time.',
+    ex1: 'Summarize this page', ex2: 'Find the cheapest flight from Cairo to Dubai next Friday', ex3: 'Fill this form with my details', ex4: 'Compare these products in a table',
+    thinking: 'Thinking', working: 'Working…', waiting: 'Waiting for your approval', done: 'Done', stopped: 'Stopped', error: 'Error',
+    allowOnce: 'Allow this action', allowAlways: 'Always allow on this site', decline: 'Decline',
+    wantsTo: 'Infera Agent wants to', planTitle: 'Proposed plan', planSites: 'Sites', approvePlan: 'Approve plan', rejectPlan: 'Make changes',
+    modeAsk: 'Manually approve', modeAuto: 'Automatically approve', modePlan: 'Ask before acting', modeSkip: 'Skip all approvals',
+    model: 'Model', mode: 'Approvals', noKey: 'Add an API key or sign in from Settings to start.', openSettings: 'Open settings',
+    save: 'Save', cancel: 'Cancel', delete: 'Delete', run: 'Run', edit: 'Edit', schedule: 'Schedule', close: 'Close',
+    command: 'Command', description: 'Description', prompt: 'Prompt', startUrl: 'Start URL (optional)',
+    newShortcut: 'New shortcut', noShortcuts: 'No shortcuts yet. Save your best prompts and run them with "/".',
+    newTask: 'New scheduled task', noTasks: 'No scheduled tasks.', frequency: 'Frequency', time: 'Time', date: 'Date',
+    once: 'Once', daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', annually: 'Yearly', dayOfWeek: 'Day of week', dayOfMonth: 'Day of month', month: 'Month',
+    lastRun: 'Last run', nextRun: 'Next run', runNow: 'Run now', enabled: 'Enabled', name: 'Name',
+    recStart: 'Start recording', recStop: 'Stop & create shortcut', recHint: 'Do the task yourself in this tab. Narrate what you are doing — your voice is transcribed and used as the main signal of intent.',
+    recording: 'Recording…', steps: 'steps', mic: 'Narrate with microphone', recDraft: 'Review the generated shortcut',
+    noHistory: 'No conversations yet.', tokensSaved: 'tokens saved by compaction', captureRegion: 'Drag to select a region, or use the full screenshot',
+    useFull: 'Use full screenshot', useRegion: 'Use selection', you: 'You', tool: 'Tool', result: 'Result', copy: 'Copy',
+    injection: 'Content on web pages is treated as untrusted data.', blockedTitle: 'Blocked',
+  },
+  ar: {
+    appName: 'إنفرا إيجنت',
+    newChat: 'محادثة جديدة', history: 'السجل', shortcuts: 'الاختصارات', scheduled: 'المهام المجدولة', record: 'تسجيل سير عمل', settings: 'الإعدادات',
+    placeholder: 'اطلب من إنفرا تنفيذ مهمة على هذه الصفحة… (اكتب / للاختصارات)',
+    send: 'إرسال', stop: 'إيقاف', attach: 'إرفاق لقطة شاشة لهذا التبويب', emptyTitle: 'ماذا تريد أن يفعل إنفرا؟',
+    emptyHint: 'يستطيع إنفرا قراءة هذه الصفحة والنقر والكتابة وتعبئة النماذج والعمل عبر التبويبات باستخدام جلسات تسجيل دخولك. تشاهد كل خطوة ويمكنك الإيقاف في أي لحظة.',
+    ex1: 'لخّص هذه الصفحة', ex2: 'ابحث عن أرخص رحلة من القاهرة إلى دبي يوم الجمعة القادم', ex3: 'عبّئ هذا النموذج ببياناتي', ex4: 'قارن هذه المنتجات في جدول',
+    thinking: 'يفكّر', working: 'يعمل…', waiting: 'بانتظار موافقتك', done: 'اكتمل', stopped: 'أُوقف', error: 'خطأ',
+    allowOnce: 'السماح بهذا الإجراء', allowAlways: 'السماح دائمًا على هذا الموقع', decline: 'رفض',
+    wantsTo: 'إنفرا إيجنت يريد أن', planTitle: 'الخطة المقترحة', planSites: 'المواقع', approvePlan: 'اعتماد الخطة', rejectPlan: 'تعديل',
+    modeAsk: 'موافقة يدوية', modeAuto: 'موافقة تلقائية', modePlan: 'اسأل قبل التنفيذ', modeSkip: 'تخطي كل الموافقات',
+    model: 'النموذج', mode: 'الموافقات', noKey: 'أضف مفتاح API أو سجّل الدخول من الإعدادات للبدء.', openSettings: 'فتح الإعدادات',
+    save: 'حفظ', cancel: 'إلغاء', delete: 'حذف', run: 'تشغيل', edit: 'تعديل', schedule: 'جدولة', close: 'إغلاق',
+    command: 'الأمر', description: 'الوصف', prompt: 'البرومت', startUrl: 'رابط البداية (اختياري)',
+    newShortcut: 'اختصار جديد', noShortcuts: 'لا توجد اختصارات بعد. احفظ أفضل برومتاتك وشغّلها بكتابة «/».',
+    newTask: 'مهمة مجدولة جديدة', noTasks: 'لا توجد مهام مجدولة.', frequency: 'التكرار', time: 'الوقت', date: 'التاريخ',
+    once: 'مرة واحدة', daily: 'يومي', weekly: 'أسبوعي', monthly: 'شهري', annually: 'سنوي', dayOfWeek: 'يوم الأسبوع', dayOfMonth: 'يوم الشهر', month: 'الشهر',
+    lastRun: 'آخر تشغيل', nextRun: 'التشغيل القادم', runNow: 'تشغيل الآن', enabled: 'مفعّلة', name: 'الاسم',
+    recStart: 'بدء التسجيل', recStop: 'إيقاف وإنشاء اختصار', recHint: 'نفّذ المهمة بنفسك في هذا التبويب. اشرح بصوتك ما تفعله — يُفرَّغ صوتك نصيًا ويُستخدم كإشارة أساسية للنية.',
+    recording: 'جارٍ التسجيل…', steps: 'خطوات', mic: 'السرد بالميكروفون', recDraft: 'راجع الاختصار الناتج',
+    noHistory: 'لا توجد محادثات بعد.', tokensSaved: 'رمز وُفِّرت بالضغط', captureRegion: 'اسحب لتحديد منطقة، أو استخدم اللقطة كاملة',
+    useFull: 'استخدام اللقطة كاملة', useRegion: 'استخدام التحديد', you: 'أنت', tool: 'أداة', result: 'النتيجة', copy: 'نسخ',
+    injection: 'محتوى صفحات الويب يُعامَل كبيانات غير موثوقة.', blockedTitle: 'محظور',
+  },
+};
+
+let lang = (navigator.language || 'en').startsWith('ar') ? 'ar' : 'en';
+
+export function setLanguage(l) {
+  if (l === 'ar' || l === 'en') lang = l;
+  else lang = (navigator.language || 'en').startsWith('ar') ? 'ar' : 'en';
+  document.documentElement.lang = lang;
+  document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+}
+
+export function t(key) {
+  return STR[lang][key] ?? STR.en[key] ?? key;
+}
+
+export function currentLang() { return lang; }
+
+export function applyI18n(root = document) {
+  root.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = t(el.dataset.i18n); });
+  root.querySelectorAll('[data-i18n-title]').forEach((el) => { el.title = t(el.dataset.i18nTitle); el.setAttribute('aria-label', t(el.dataset.i18nTitle)); });
+  root.querySelectorAll('[data-i18n-placeholder]').forEach((el) => { el.placeholder = t(el.dataset.i18nPlaceholder); });
+}
+
+export const MODE_LABEL = { ask: 'modeAsk', auto: 'modeAuto', follow_a_plan: 'modePlan', skip_all_permission_checks: 'modeSkip' };

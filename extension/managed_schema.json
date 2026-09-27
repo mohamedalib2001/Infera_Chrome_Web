@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "properties": {
+    "enabled": { "type": "boolean", "title": "Enable Infera Agent for the organization", "description": "When false the agent refuses to run." },
+    "forceLoginOrgUUID": { "type": "string", "title": "Restrict sign-in to a single organization UUID" },
+    "allowlist": { "type": "array", "items": { "type": "string" }, "title": "Only these domains may be used by the agent (empty = all)" },
+    "blocklist": { "type": "array", "items": { "type": "string" }, "title": "Domains that are always blocked" },
+    "defaultPermissionMode": { "type": "string", "enum": ["ask", "auto", "follow_a_plan", "skip_all_permission_checks"], "title": "Default permission mode" },
+    "disableSkipAllApprovals": { "type": "boolean", "title": "Hide the 'Skip all approvals' mode" },
+    "apiBaseUrl": { "type": "string", "title": "Model API base URL" },
+    "relayUrl": { "type": "string", "title": "Cloud bridge relay URL (wss://)" }
+  }
+}
