@@ -196,7 +196,7 @@ async function handlePanel(msg, s, port) {
     case 'stop_recording': return stopRecording({ transcript: msg.transcript || '' });
     case 'recording_state': return recordingState();
     case 'open_settings': chrome.runtime.openOptionsPage(); return { ok: true };
-    case 'infera_sign_in': await inferaSignIn({ email: msg.email, password: msg.password, server: msg.server }); return panelState(s);
+    case 'infera_sign_in': await inferaSignIn({ server: msg.server }); return panelState(s);
     case 'sign_out': await signOut(); return panelState(s);
     case 'refresh_account': await refreshInferaAccount(); return panelState(s);
     case 'state': return panelState(s);
@@ -228,7 +228,7 @@ async function handleMessage(msg, sender) {
     case 'auth_status': return authStatus();
     case 'sign_in': return signIn();
     case 'sign_out': await signOut(); return authStatus();
-    case 'infera_sign_in': return inferaSignIn({ email: msg.email, password: msg.password, server: msg.server });
+    case 'infera_sign_in': return inferaSignIn({ server: msg.server });
     case 'refresh_account': return refreshInferaAccount();
     case 'classify': return classifyUrl(msg.url);
     case 'list_mcp_servers': return listServers();

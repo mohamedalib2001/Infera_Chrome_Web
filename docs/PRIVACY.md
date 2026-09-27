@@ -5,14 +5,15 @@ _آخر تحديث: 27 سبتمبر 2026 — Last updated: 27 September 2026_
 
 ## ما الذي تجمعه الإضافة ولماذا
 
-إنفرا إيجنت وكيل تصفح ينفّذ المهام التي يطلبها المستخدم. لتنفيذ مهمة، ترسل الإضافة إلى خادم
-إنفرا إيجنت الخاص بمؤسستك (ثم إلى مزوّد النموذج) ما يلزم لفهم الصفحة والتصرف فيها:
+إنفرا إيجنت وكيل تصفح ينفّذ المهام التي يطلبها المستخدم. لتنفيذ مهمة، ترسل الإضافة إلى
+inferaagent.com (ثم إلى مزوّد النموذج) ما يلزم لفهم الصفحة والتصرف فيها:
 
 * نص طلبك والمحادثة.
 * لقطات شاشة للتبويبات التي يعمل عليها الوكيل، ونص الصفحة وبنيتها.
 * عناوين وروابط التبويبات داخل مجموعة تبويبات إنفرا.
 * عند طلبك فقط: رسائل console وبيانات طلبات الشبكة، مع إخفاء قيم المصادقة (`REDACTED`).
-* بريدك الإلكتروني عند تسجيل الدخول بحسابك على إنفرا إيجنت.
+* بيانات حسابك على inferaagent.com (الاسم والبريد والرصيد) عبر تسجيل الدخول OAuth.
+* عدد التوكنز المستهلكة لكل طلب، لخصمها من رصيدك.
 
 لا تقرأ الإضافة أي تبويب خارج مجموعة تبويبات إنفرا، ولا تعمل في الخلفية دون مهمة منك أو مهمة
 مجدولة أنشأتها أنت.
@@ -43,7 +44,7 @@ _آخر تحديث: 27 سبتمبر 2026 — Last updated: 27 September 2026_
 
 **English summary.** Infera Agent sends your request, screenshots and text of the tabs in its own
 tab group, their titles/URLs, and (on request) console/network metadata with credentials redacted to
-your organization's Infera Agent server and its model provider, only to perform the task you asked
+inferaagent.com and its model provider, only to perform the task you asked
 for. Settings, approved sites, shortcuts, schedules and history stay in local browser storage. We do
 not sell data or use it for advertising; the model provider key never reaches the browser; message
 content is not written to the server audit log.

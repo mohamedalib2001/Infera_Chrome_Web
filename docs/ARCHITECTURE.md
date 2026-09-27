@@ -53,12 +53,13 @@ relay client (`relay.js`), remote MCP client (`remote-mcp.js`), scheduler
 * Every user message carries a `<tab_context>` JSON block (`availableTabs`, `initialTabId`) with an
   explicit note that titles/URLs are page-authored, untrusted content.
 
-Accounts: users sign in with their **Infera Agent account** (`POST /v1/sessions` on the Infera Agent
-server, `auth.js`); model requests then go to the Infera Agent gateway
-`/v1/browser-agent/v1/messages`, which adds the organisation's provider key server-side and relays the
-stream (Infera_Agent `packages/agent/browser-agent.ts`). No provider key is stored in the browser. A
-personal API key / OAuth remain as developer options. The server URL is baked in at build time
-(`config.js`, `scripts/build-store.mjs`) or set by policy (`inferaUrl`).
+Accounts: users sign in with their **INFERA Agent account on inferaagent.com** via OAuth 2.1
+(discovery, dynamic client registration, PKCE, `chrome.identity.launchWebAuthFlow`, refresh tokens —
+`auth.js`). Model requests go to `https://inferaagent.com/api/browser-agent/v1/messages`, which checks the
+person's credits, adds the platform key server-side, relays the stream and charges the tokens to the
+person's credits (Infera_Agent `apps/server/src/browserAgent.ts`). No provider key is stored in the
+browser. A personal API key / generic OAuth remain as developer options. The server is baked in at build
+time (`config.js`, `scripts/build-store.mjs`) or set by policy (`inferaUrl`).
 
 Model API: Anthropic Messages API over HTTPS with SSE (`llm.js`; no bundler, so the wire protocol is
 used directly with `anthropic-dangerous-direct-browser-access`). Default model `claude-opus-5` with
@@ -89,7 +90,7 @@ Only blank tabs the agent created are closed at session end.
 
 ## Permissions (report §5)
 
-All 15 permissions are declared and used: `sidePanel`, `storage`, `scripting`, `debugger`,
+All 16 permissions are declared and used (the 15 from the report plus `identity` for the INFERA Agent OAuth sign-in window): `sidePanel`, `storage`, `scripting`, `debugger`,
 `tabGroups`, `tabs`, `alarms`, `notifications`, `system.display` (window-resize clamping to the display
 work area), `webNavigation` (blocked-category interception, domain transitions, OAuth redirect, recorder),
 `declarativeNetRequestWithHostAccess` (identifies the client to Infera endpoints, `rules/dnr_rules.json`),

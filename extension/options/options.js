@@ -16,7 +16,7 @@ const el = (tag, attrs = {}, ...kids) => {
 
 const L = {
   en: {
-    subtitle: 'Settings, permissions and connections', account: 'Infera Agent account', accountHint: 'Sign in with your Infera Agent account. Model requests go through your organization\'s Infera Agent server, so no API key is stored in the browser.',
+    subtitle: 'Settings, permissions and connections', account: 'Infera Agent account', accountHint: 'Sign in with your INFERA Agent account on inferaagent.com. Model requests go through INFERA Agent and are paid from your credits, so no API key is stored in the browser.',
     advanced: 'Advanced (developers)', advancedHint: 'Use your own API key or OAuth server instead of an Infera Agent account.',
     apiKey: 'API key', baseUrl: 'API base URL', oauthAuth: 'OAuth authorize URL', oauthToken: 'OAuth token URL', oauthClient: 'OAuth client ID', oauthRedirect: 'OAuth redirect URI',
     signIn: 'Sign in', signOut: 'Sign out', signedIn: 'Signed in', notSignedIn: 'Not signed in',
@@ -35,7 +35,7 @@ const L = {
     srvName: 'Name', srvUrl: 'URL (https://…/mcp)', srvAuth: 'Authorization header (optional)', add: 'Add server', remove: 'Remove', noServers: 'No remote MCP servers.',
   },
   ar: {
-    subtitle: 'الإعدادات والأذونات والاتصالات', account: 'حساب إنفرا إيجنت', accountHint: 'سجّل الدخول بحسابك على إنفرا إيجنت. تمرّ طلبات النموذج عبر خادم إنفرا إيجنت الخاص بمؤسستك، فلا يُخزَّن أي مفتاح API في المتصفح.',
+    subtitle: 'الإعدادات والأذونات والاتصالات', account: 'حساب إنفرا إيجنت', accountHint: 'سجّل الدخول بحسابك على inferaagent.com. تمرّ طلبات النموذج عبر إنفرا إيجنت وتُخصم من رصيدك، فلا يُخزَّن أي مفتاح API في المتصفح.',
     advanced: 'متقدم (للمطوّرين)', advancedHint: 'استخدم مفتاح API خاصًا بك أو خادم OAuth بدلًا من حساب إنفرا إيجنت.',
     apiKey: 'مفتاح API', baseUrl: 'عنوان واجهة API', oauthAuth: 'رابط التفويض (OAuth)', oauthToken: 'رابط الرمز (OAuth)', oauthClient: 'معرّف العميل (OAuth)', oauthRedirect: 'رابط إعادة التوجيه (OAuth)',
     signIn: 'تسجيل الدخول', signOut: 'تسجيل الخروج', signedIn: 'تم تسجيل الدخول', notSignedIn: 'لم يتم تسجيل الدخول',
@@ -85,8 +85,6 @@ async function render() {
 
   // Account: Infera Agent sign-in first; personal key / OAuth are developer options.
   const auth = await send('auth_status');
-  const email = el('input', { type: 'email', autocomplete: 'username', placeholder: 'name@company.com' });
-  const password = el('input', { type: 'password', autocomplete: 'current-password' });
   const server = el('input', { type: 'url', value: auth.server || '', placeholder: 'https://agent.example.com', disabled: policy.inferaUrl ? true : undefined });
   const errA = el('span', { class: 'saved', style: 'color:var(--danger)' });
   const acc = auth.account || {};
@@ -94,15 +92,16 @@ async function render() {
     ? el('div', {},
       el('div', { class: 'pill ok' }, `${tr('signedIn')}: ${acc.displayName || acc.email || ''}${acc.organizationName ? ` · ${acc.organizationName}` : ''}`),
       el('div', { class: 'muted', style: 'font-size:12.5px;margin-top:4px;direction:ltr;text-align:start' }, auth.server),
-      auth.providerConfigured === false ? el('p', { class: 'badge warn', style: 'margin-top:8px' }, t('noProvider')) : null,
+      auth.credits !== null && auth.credits !== undefined ? el('div', { class: 'muted', style: 'font-size:12.5px;margin-top:4px' }, `${t('credits')}: ${Number(auth.credits).toFixed(2)} ${auth.currency || ''}`) : null,
+      auth.block ? el('p', { class: 'badge warn', style: 'margin-top:8px' }, t(auth.block === 'monthly_cap' ? 'blockCap' : auth.block === 'consent_required' ? 'blockConsent' : 'blockCredits')) : null,
       el('div', { class: 'actions' }, el('button', { class: 'btn', onclick: async () => { await send('sign_out'); render(); } }, tr('signOut'))))
     : el('div', {},
-      el('div', { class: 'fields' }, field(t('email'), email), field(t('password'), password), field(t('server'), server)),
+      el('div', { class: 'fields' }, field(t('server'), server)),
       el('div', { class: 'actions' }, el('button', { class: 'btn primary', onclick: async () => {
         errA.textContent = '';
-        try { await send('infera_sign_in', { email: email.value, password: password.value, server: policy.inferaUrl ? undefined : server.value }); render(); }
+        try { await send('infera_sign_in', { server: policy.inferaUrl ? undefined : server.value }); render(); }
         catch (e) { errA.textContent = e.message; }
-      } }, tr('signIn')), errA));
+      } }, t('signIn')), errA));
 
   const apiKey = el('input', { type: 'password', value: s.apiKey, autocomplete: 'off', placeholder: 'sk-…' });
   const baseUrl = el('input', { value: s.apiBaseUrl, disabled: policy.apiBaseUrl ? true : undefined });

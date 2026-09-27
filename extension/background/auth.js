@@ -1,77 +1,163 @@
 // Authentication, in order of preference:
-//   1. Infera Agent account — email + password against the Infera Agent API
-//      (POST /v1/sessions). Model calls then go through the Infera gateway
-//      (/v1/browser-agent), so no provider key ever reaches the browser.
+//   1. INFERA Agent account — OAuth sign-in on inferaagent.com. Model calls then
+//      go through the INFERA Agent gateway (/api/browser-agent) and are paid from
+//      the person's credits; no provider key ever reaches the browser.
 //   2. OAuth 2.0 PKCE against a configured authorization server.
 //   3. A personal API key (developer mode, Settings -> Advanced).
 import { STORAGE_KEYS } from './constants.js';
 import { getLocal, setLocal, getSettings, getManagedPolicy } from './storage.js';
 import { INFERA_API_URL } from '../config.js';
 
-// ---------------- Infera Agent account ----------------
+// ---------------- Infera Agent account (OAuth 2.1 + PKCE) ----------------
+// inferaagent.com is an OAuth authorization server (the same one MCP apps use):
+// the extension registers itself as a public client, the person approves it
+// on inferaagent.com (password, Google or SSO — whatever they sign in with),
+// and the access token authorises the model gateway /api/browser-agent.
 export async function inferaServer() {
   const s = await getSettings();
   const policy = await getManagedPolicy();
   return String(policy.inferaUrl || s.inferaUrl || INFERA_API_URL || '').replace(/\/+$/, '');
 }
 
-async function inferaFetch(base, path, { method = 'GET', token, body } = {}) {
+async function inferaFetch(url, { method = 'GET', token, body, form } = {}) {
   let res;
   try {
-    res = await fetch(base + path, {
+    res = await fetch(url, {
       method,
-      headers: { ...(body ? { 'content-type': 'application/json' } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}) },
-      body: body ? JSON.stringify(body) : undefined,
+      headers: {
+        ...(body ? { 'content-type': 'application/json' } : {}),
+        ...(form ? { 'content-type': 'application/x-www-form-urlencoded' } : {}),
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      body: body ? JSON.stringify(body) : form ? new URLSearchParams(form).toString() : undefined,
       signal: AbortSignal.timeout(20_000),
     });
   } catch {
-    throw new Error(`Cannot reach the Infera Agent server at ${base}.`);
+    throw new Error(`Cannot reach INFERA Agent at ${new URL(url).origin}.`);
   }
   const text = await res.text();
   let json = null;
   try { json = text ? JSON.parse(text) : null; } catch { /* not JSON */ }
   if (!res.ok) {
-    const err = new Error(json?.error?.message || `Infera Agent server returned ${res.status}`);
+    const err = new Error(json?.error?.message || (typeof json?.error === 'string' ? json.error : '') || `INFERA Agent returned ${res.status}`);
     err.status = res.status;
     throw err;
   }
   return json;
 }
 
-export async function inferaSignIn({ email, password, server }) {
+async function discover(server) {
+  const meta = await inferaFetch(`${server}/.well-known/oauth-authorization-server`);
+  if (!meta?.authorization_endpoint || !meta?.token_endpoint) throw new Error('This server does not offer INFERA Agent sign-in.');
+  return meta;
+}
+
+// One public client per server and redirect URI, registered on first sign-in.
+async function clientFor(server, meta, redirectUri) {
+  const key = `oauthClient:${server}`;
+  const saved = await getLocal(key, null);
+  if (saved?.client_id && saved.redirect_uri === redirectUri) return saved.client_id;
+  if (!meta.registration_endpoint) throw new Error('This server does not allow app registration.');
+  const reg = await inferaFetch(meta.registration_endpoint, {
+    method: 'POST',
+    body: { client_name: 'INFERA Agent for Chrome', redirect_uris: [redirectUri], token_endpoint_auth_method: 'none', grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'] },
+  });
+  await setLocal(key, { client_id: reg.client_id, redirect_uri: redirectUri });
+  return reg.client_id;
+}
+
+export async function inferaSignIn({ server } = {}) {
   if (server) {
     const clean = String(server).trim().replace(/\/+$/, '');
     if (!/^https:\/\//i.test(clean) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(clean)) {
-      throw new Error('The Infera Agent server address must start with https://');
+      throw new Error('The INFERA Agent address must start with https://');
     }
     const cur = await getLocal(STORAGE_KEYS.SETTINGS, {});
     await setLocal(STORAGE_KEYS.SETTINGS, { ...cur, inferaUrl: clean });
   }
   const base = await inferaServer();
-  if (!base) throw new Error('Enter your Infera Agent server address.');
-  if (!email || !password) throw new Error('Enter your email and password.');
-  const session = await inferaFetch(base, '/v1/sessions', { method: 'POST', body: { email: String(email).trim(), password } });
-  const me = await inferaFetch(base, '/v1/browser-agent/me', { token: session.token }).catch(() => null);
-  await setLocal(STORAGE_KEYS.AUTH, {
-    kind: 'infera',
-    server: base,
-    accessToken: session.token,
-    expiresAt: session.expiresAt ? Date.parse(session.expiresAt) : null,
-    organizationId: session.organizationId,
-    account: me ? { email: me.email, displayName: me.displayName, organizationName: me.organizationName } : { email: String(email).trim() },
-    providerConfigured: me?.providerConfigured ?? null,
+  if (!base) throw new Error('Enter the INFERA Agent address.');
+  const meta = await discover(base);
+  const redirectUri = chrome.identity.getRedirectURL('infera');
+  const clientId = await clientFor(base, meta, redirectUri);
+  const { verifier, challenge } = await pkce();
+  const state = b64url(crypto.getRandomValues(new Uint8Array(16)));
+  const authUrl = new URL(meta.authorization_endpoint);
+  authUrl.search = new URLSearchParams({
+    response_type: 'code', client_id: clientId, redirect_uri: redirectUri, state,
+    code_challenge: challenge, code_challenge_method: 'S256', scope: (meta.scopes_supported || []).join(' '),
+  }).toString();
+
+  let returned;
+  try {
+    returned = await chrome.identity.launchWebAuthFlow({ url: authUrl.toString(), interactive: true });
+  } catch (e) {
+    throw new Error(/did not approve|canceled|closed/i.test(String(e?.message)) ? 'Sign-in was cancelled.' : `Sign-in failed: ${e?.message || e}`);
+  }
+  const back = new URL(returned);
+  if (back.searchParams.get('state') !== state) throw new Error('Sign-in failed (state mismatch). Try again.');
+  if (back.searchParams.get('error')) throw new Error(back.searchParams.get('error') === 'access_denied' ? 'Access was not approved.' : back.searchParams.get('error'));
+  const code = back.searchParams.get('code');
+  if (!code) throw new Error('Sign-in failed: no authorization code.');
+
+  const t = await inferaFetch(meta.token_endpoint, {
+    method: 'POST',
+    form: { grant_type: 'authorization_code', code, redirect_uri: redirectUri, client_id: clientId, code_verifier: verifier },
   });
+  await saveInfera({ server: base, clientId, tokenEndpoint: meta.token_endpoint }, t);
+  await refreshInferaAccount();
   return authStatus();
 }
 
-export async function refreshInferaAccount() {
-  const a = await getLocal(STORAGE_KEYS.AUTH, null);
-  if (a?.kind !== 'infera') return null;
+async function saveInfera(ctx, t, prev = {}) {
+  await setLocal(STORAGE_KEYS.AUTH, {
+    ...prev,
+    kind: 'infera',
+    server: ctx.server,
+    clientId: ctx.clientId,
+    tokenEndpoint: ctx.tokenEndpoint,
+    accessToken: t.access_token,
+    refreshToken: t.refresh_token || prev.refreshToken || null,
+    expiresAt: t.expires_in ? Date.now() + t.expires_in * 1000 - 60_000 : null,
+  });
+}
+
+// Exchanges the refresh token for a new access token; signs out if that fails.
+async function refreshInferaToken(a) {
+  if (!a?.refreshToken) return null;
   try {
-    const me = await inferaFetch(a.server, '/v1/browser-agent/me', { token: a.accessToken });
-    await setLocal(STORAGE_KEYS.AUTH, { ...a, providerConfigured: me.providerConfigured, account: { email: me.email, displayName: me.displayName, organizationName: me.organizationName } });
+    const t = await inferaFetch(a.tokenEndpoint || `${a.server}/oauth/token`, {
+      method: 'POST', form: { grant_type: 'refresh_token', refresh_token: a.refreshToken, client_id: a.clientId },
+    });
+    await saveInfera({ server: a.server, clientId: a.clientId, tokenEndpoint: a.tokenEndpoint }, t, a);
+    return t.access_token;
+  } catch {
+    await chrome.storage.local.remove(STORAGE_KEYS.AUTH);
+    return null;
+  }
+}
+
+async function currentInfera() {
+  const a = await getLocal(STORAGE_KEYS.AUTH, null);
+  if (a?.kind !== 'infera' || !a.accessToken) return null;
+  if (a.expiresAt && Date.now() > a.expiresAt) {
+    const tok = await refreshInferaToken(a);
+    return tok ? getLocal(STORAGE_KEYS.AUTH, null) : null;
+  }
+  return a;
+}
+
+export async function refreshInferaAccount() {
+  const a = await currentInfera();
+  if (!a) return authStatus();
+  try {
+    const me = await inferaFetch(`${a.server}/api/browser-agent/me`, { token: a.accessToken });
+    await setLocal(STORAGE_KEYS.AUTH, { ...a, account: { email: me.email, displayName: me.name, avatar: me.avatar }, credits: me.credits, currency: me.currency, block: me.block });
   } catch (e) {
-    if (e.status === 401) await chrome.storage.local.remove(STORAGE_KEYS.AUTH);
+    if (e.status === 401) {
+      if (!(await refreshInferaToken(a))) return authStatus();
+      return refreshInferaAccount();
+    }
   }
   return authStatus();
 }
@@ -79,21 +165,21 @@ export async function refreshInferaAccount() {
 // What the model client should use for this request.
 export async function getModelAuth() {
   const a = await getLocal(STORAGE_KEYS.AUTH, null);
-  if (a?.kind === 'infera' && a.accessToken) {
-    if (a.expiresAt && Date.now() > a.expiresAt) {
-      await chrome.storage.local.remove(STORAGE_KEYS.AUTH);
-      throw new Error('Your Infera Agent session has expired. Sign in again from the side panel.');
-    }
-    return { mode: 'infera', baseUrl: `${a.server}/v1/browser-agent`, token: a.accessToken };
+  if (a?.kind === 'infera') {
+    const cur = await currentInfera();
+    if (!cur) throw new Error('Your INFERA Agent session has ended. Sign in again from the side panel.');
+    return { mode: 'infera', baseUrl: `${cur.server}/api/browser-agent`, token: cur.accessToken };
   }
   const token = await getAccessToken();
   if (token) return { mode: 'oauth', token };
   return { mode: 'apikey' };
 }
 
+// The gateway said 401: try the refresh token once; true means "retry".
 export async function handleInferaUnauthorized() {
   const a = await getLocal(STORAGE_KEYS.AUTH, null);
-  if (a?.kind === 'infera') await chrome.storage.local.remove(STORAGE_KEYS.AUTH);
+  if (a?.kind !== 'infera') return false;
+  return !!(await refreshInferaToken(a));
 }
 
 function b64url(bytes) {
@@ -173,7 +259,7 @@ async function saveTokens(t) {
 export async function getAccessToken() {
   const a = await getLocal(STORAGE_KEYS.AUTH, null);
   if (!a?.accessToken) return null;
-  if (a.kind === 'infera') return a.expiresAt && Date.now() > a.expiresAt ? null : a.accessToken;
+  if (a.kind === 'infera') return (await currentInfera())?.accessToken ?? null;
   if (a.expiresAt && Date.now() > a.expiresAt) {
     if (!a.refreshToken) return null;
     const s = await getSettings();
@@ -190,9 +276,9 @@ export async function getAccessToken() {
 
 export async function signOut() {
   const a = await getLocal(STORAGE_KEYS.AUTH, null);
-  if (a?.kind === 'infera') {
-    await inferaFetch(a.server, '/v1/sessions/current', { method: 'DELETE', token: a.accessToken }).catch(() => {});
-  }
+  // The token is dropped here; the person can also revoke "INFERA Agent for Chrome"
+  // under Settings → Connect on inferaagent.com.
+  void a;
   await chrome.storage.local.remove(STORAGE_KEYS.AUTH);
 }
 
@@ -205,7 +291,9 @@ export async function authStatus() {
     oauth: !infera && !!a?.accessToken,
     signedIn: !!a?.accessToken,
     account: a?.account || null,
-    providerConfigured: infera ? a.providerConfigured : null,
+    credits: infera ? a.credits ?? null : null,
+    currency: infera ? a.currency ?? null : null,
+    block: infera ? a.block ?? null : null,
     server: await inferaServer(),
     apiKey: !!s.apiKey,
     ready: infera || !!a?.accessToken || !!s.apiKey,

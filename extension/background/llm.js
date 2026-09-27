@@ -89,10 +89,11 @@ async function post(path, reqBody, betas, signal) {
   const allBetas = [...new Set([...authBetas, ...betas])];
   if (allBetas.length) headers['anthropic-beta'] = allBetas.join(',');
   const url = baseUrl.replace(/\/+$/, '') + path;
-  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(reqBody), signal });
+  let res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(reqBody), signal });
   if (mode === 'infera' && res.status === 401) {
-    await handleInferaUnauthorized();
-    throw new ApiError(401, 'authentication_error', 'Your Infera Agent session has expired. Sign in again from the side panel.');
+    // Expired access token: refresh once and retry, otherwise ask to sign in again.
+    if (await handleInferaUnauthorized()) return post(path, reqBody, betas, signal);
+    throw new ApiError(401, 'authentication_error', 'Your INFERA Agent session has ended. Sign in again from the side panel.');
   }
   return res;
 }
@@ -113,6 +114,7 @@ async function request(params, signal) {
     let err = {};
     try { err = (await res.json()).error || {}; } catch { /* non-JSON */ }
     const msg = err.message || res.statusText;
+    if (res.status === 402) throw new ApiError(402, 'billing_error', msg);
     if (res.status === 400) {
       const f = featureFromError(msg);
       if (f && !disabledFeatures.has(f)) { disabledFeatures.add(f); continue; }

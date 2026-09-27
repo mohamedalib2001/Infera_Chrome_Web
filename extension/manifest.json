@@ -34,11 +34,17 @@
   },
   "commands": {
     "_execute_action": {
-      "suggested_key": { "default": "Ctrl+E", "mac": "Command+E" },
+      "suggested_key": {
+        "default": "Ctrl+E",
+        "mac": "Command+E"
+      },
       "description": "__MSG_cmdOpen__"
     },
     "stop-agent": {
-      "suggested_key": { "default": "Ctrl+Shift+E", "mac": "Command+Shift+E" },
+      "suggested_key": {
+        "default": "Ctrl+Shift+E",
+        "mac": "Command+Shift+E"
+      },
       "description": "__MSG_cmdStop__"
     }
   },
@@ -55,14 +61,21 @@
     "webNavigation",
     "declarativeNetRequestWithHostAccess",
     "offscreen",
+    "identity",
     "nativeMessaging",
     "downloads",
     "unlimitedStorage"
   ],
-  "host_permissions": ["<all_urls>"],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "declarative_net_request": {
     "rule_resources": [
-      { "id": "infera_rules", "enabled": true, "path": "rules/dnr_rules.json" }
+      {
+        "id": "infera_rules",
+        "enabled": true,
+        "path": "rules/dnr_rules.json"
+      }
     ]
   },
   "storage": {
@@ -70,8 +83,13 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["icons/logo.png", "icons/icon48.png"],
-      "matches": ["<all_urls>"]
+      "resources": [
+        "icons/logo.png",
+        "icons/icon48.png"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ],
   "content_security_policy": {

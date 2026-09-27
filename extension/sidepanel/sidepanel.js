@@ -96,9 +96,11 @@ function renderAuth() {
   $('#account').hidden = !a.infera;
   if (a.infera) {
     const acc = a.account || {};
-    $('#accountText').textContent = `${t('signedInAs')} ${acc.displayName || acc.email || ''}${acc.organizationName ? ` · ${acc.organizationName}` : ''}`;
+    const credits = a.credits === null || a.credits === undefined ? '' : ` · ${t('credits')}: ${Number(a.credits).toFixed(2)} ${a.currency || ''}`;
+    $('#accountText').textContent = `${t('signedInAs')} ${acc.displayName || acc.email || ''}${credits}`;
   }
-  $('#noProvider').hidden = !(a.infera && a.providerConfigured === false);
+  $('#noProvider').hidden = !(a.infera && a.block);
+  if (a.infera && a.block) $('#noProvider').querySelector('span').textContent = t(a.block === 'monthly_cap' ? 'blockCap' : a.block === 'consent_required' ? 'blockConsent' : 'blockCredits');
   const server = $('#siServer');
   if (!ready) {
     server.value = a.server || '';
@@ -113,8 +115,7 @@ $('#signIn').addEventListener('submit', async (e) => {
   err.hidden = true;
   $('#siSubmit').disabled = true;
   try {
-    loadState(await call('infera_sign_in', { email: $('#siEmail').value, password: $('#siPassword').value, server: $('#siServer').hidden ? undefined : $('#siServer').value }));
-    $('#siPassword').value = '';
+    loadState(await call('infera_sign_in', { server: $('#siServer').hidden ? undefined : $('#siServer').value }));
   } catch (x) {
     err.textContent = x.message;
     err.hidden = false;

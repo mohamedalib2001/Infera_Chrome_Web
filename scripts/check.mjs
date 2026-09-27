@@ -20,9 +20,9 @@ for (const f of js) {
 okm(`syntax of ${js.length} JS files`);
 
 const manifest = JSON.parse(readFileSync(path.join(ext, 'manifest.json'), 'utf8'));
-const expected = ['sidePanel', 'storage', 'scripting', 'debugger', 'tabGroups', 'tabs', 'alarms', 'notifications', 'system.display', 'webNavigation', 'declarativeNetRequestWithHostAccess', 'offscreen', 'nativeMessaging', 'downloads', 'unlimitedStorage'];
-if (JSON.stringify([...manifest.permissions].sort()) !== JSON.stringify([...expected].sort())) fail('manifest permissions differ from the 15 documented permissions');
-else okm('15 permissions declared');
+const expected = ['sidePanel', 'storage', 'scripting', 'debugger', 'tabGroups', 'tabs', 'alarms', 'notifications', 'system.display', 'webNavigation', 'declarativeNetRequestWithHostAccess', 'offscreen', 'identity', 'nativeMessaging', 'downloads', 'unlimitedStorage'];
+if (JSON.stringify([...manifest.permissions].sort()) !== JSON.stringify([...expected].sort())) fail('manifest permissions differ from the documented permissions');
+else okm(`${expected.length} permissions declared`);
 const der = Buffer.from(manifest.key, 'base64');
 const id = [...createHash('sha256').update(der).digest('hex').slice(0, 32)].map((c) => String.fromCharCode(97 + parseInt(c, 16))).join('');
 const common = readFileSync(path.join(root, 'native-host', 'lib', 'common.js'), 'utf8');

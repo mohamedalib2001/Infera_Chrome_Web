@@ -3,35 +3,38 @@
 الهدف: أن يثبّت أي مستخدم الإضافة على أي جهاز من متجر Chrome، ثم يسجّل الدخول بحسابه
 على إنفرا إيجنت، دون مفتاح API ودون أي إعداد.
 
-## كيف يعمل الربط بحساب إنفرا إيجنت
+## كيف يعمل الربط بحساب إنفرا إيجنت (inferaagent.com)
 
 ```
-الإضافة (متصفح المستخدم)                      خادم إنفرا إيجنت                 مزوّد النموذج
-─────────────────────────                      ─────────────────                 ─────────────
-1. POST /v1/sessions {email, password}   ──►   التحقق من الحساب (Argon2id)
-                                          ◄──  token مرتبط بالمؤسسة
-2. GET  /v1/browser-agent/me             ──►   الحساب، المؤسسة، هل المزوّد مضبوط
-3. POST /v1/browser-agent/v1/messages    ──►   فلترة الطلب + مفتاح المؤسسة     ──►  Messages API
-   (Authorization: Bearer <token>)        ◄──  بث الاستجابة كما هي            ◄──
+الإضافة (متصفح المستخدم)                     inferaagent.com                      مزوّد النموذج
+─────────────────────────                     ───────────────                      ─────────────
+1. /.well-known/oauth-authorization-server ►  بيانات OAuth
+2. POST /oauth/register (مرة واحدة)       ►  client_id للإضافة
+3. نافذة /oauth/authorize                 ►  المستخدم يسجّل الدخول (كلمة مرور/Google/SSO) ويوافق
+4. POST /oauth/token (PKCE)               ►  access_token + refresh_token
+5. GET  /api/browser-agent/me             ►  الحساب، الرصيد، هل الوكيل متاح
+6. POST /api/browser-agent/v1/messages    ►  فحص الرصيد + فلترة + مفتاح المنصة      ►  Messages API
+                                          ◄  بث الاستجابة كما هي، ثم خصم التوكنز من الرصيد
 ```
 
-* مفتاح النموذج محفوظ في Secrets Core على خادم إنفرا إيجنت لكل مؤسسة، ولا يصل إلى المتصفح أبدًا.
-* كل استدعاء يُسجَّل في سجل التدقيق `agent.browser.model_call` دون محتوى الرسائل.
-* تسجيل الخروج يلغي الجلسة على الخادم (`DELETE /v1/sessions/current`).
-* الكود: `packages/agent/browser-agent.ts` و`packages/api/routes.ts` في مستودع Infera_Agent.
+* مفتاح النموذج على خادم المنصة فقط؛ لا يصل إلى المتصفح.
+* الاستهلاك يُخصم من رصيد المستخدم (عملية `browser_agent` في دفتر الحسابات)، وعند نفاد الرصيد يرد
+  الخادم بـ 402 وتظهر للمستخدم رسالة «اشحن رصيدك».
+* التوكن يتجدد تلقائيًا (refresh token)، ويمكن للمستخدم إلغاء «INFERA Agent for Chrome» من
+  الإعدادات ← Connect في inferaagent.com.
+* الكود: `apps/server/src/browserAgent.ts` في مستودع Infera_Agent، الفرع
+  `claude/pensive-dijkstra-r61pm0-chrome-gateway` (مبني على `claude/owner-real-services`).
 
-## 1) تجهيز خادم إنفرا إيجنت
+## 1) تفعيل البوابة على inferaagent.com
 
-1. انشر نسخة Infera_Agent التي تحتوي بوابة المتصفح (الفرع `claude/pensive-dijkstra-r61pm0`، commit `554775a`).
-2. أضف مفتاح مزوّد النموذج لكل مؤسسة من الواجهة أو عبر `POST /v1/secrets`:
-   `class: PLATFORM_PROVIDER_SECRET`، `name: ANTHROPIC_API_KEY`.
-3. تأكد أن الخادم متاح عبر HTTPS (ملف `deploy/Caddyfile` يمرّر البث فورًا بعد هذا التعديل).
-4. إن ضبطت `allowedOrigins` في الخادم، أضف `chrome-extension://<معرّف الإضافة>`.
+1. راجع الفرع `claude/pensive-dijkstra-r61pm0-chrome-gateway` في مستودع Infera_Agent.
+2. ادمجه في `claude/owner-real-services`. **الدمج ينشر على الإنتاج تلقائيًا** (`.github/workflows/deploy.yml`).
+3. تحقّق بعد النشر: `curl -i https://inferaagent.com/api/browser-agent/me` يجب أن يرد `401` بصيغة JSON.
 
 ## 2) بناء حزمة المتجر
 
 ```bash
-node scripts/build-store.mjs --api-url https://<عنوان خادم إنفرا إيجنت> --version 1.0.0
+node scripts/build-store.mjs --api-url https://inferaagent.com --version 1.0.0
 # الناتج: dist/infera-agent-1.0.0.zip
 ```
 
@@ -66,6 +69,7 @@ node scripts/build-store.mjs --api-url https://<عنوان خادم إنفرا �
 | `webNavigation` | حظر المواقع عالية الخطورة ورصد الانتقال بين النطاقات |
 | `declarativeNetRequestWithHostAccess` | تعريف طلبات الإضافة لخادم إنفرا إيجنت |
 | `offscreen` | تشغيل صوت الإشعار وإنشاء ملفات GIF |
+| `identity` | تسجيل الدخول بحساب إنفرا إيجنت (OAuth) في نافذة آمنة |
 | `nativeMessaging` | الربط الاختياري مع Infera Code على جهاز المستخدم |
 | `downloads` | حفظ تسجيلات GIF واللقطات، والتنزيلات بعد موافقة المستخدم |
 | `<all_urls>` | الوكيل يعمل على أي موقع يطلبه المستخدم |
@@ -84,7 +88,7 @@ node scripts/build-store.mjs --api-url https://<عنوان خادم إنفرا �
 {
   "ExtensionInstallForcelist": ["<معرّف المتجر>;https://clients2.google.com/service/update2/crx"],
   "3rdparty": { "extensions": { "<معرّف المتجر>": {
-    "inferaUrl": "https://agent.company.com",
+    "inferaUrl": "https://inferaagent.com",
     "blocklist": ["bank.example"],
     "defaultPermissionMode": "ask",
     "disableSkipAllApprovals": true
