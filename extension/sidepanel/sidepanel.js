@@ -34,6 +34,8 @@ async function connect() {
   port.onMessage.addListener(onEvent);
   port.onDisconnect.addListener(() => setTimeout(connect, 500)); // service worker restarted
   port.postMessage({ type: 'init', windowId });
+  // Keep the account (and the provider status) fresh; a revoked session signs the panel out.
+  setTimeout(() => call('refresh_account').then(loadState).catch(() => {}), 1500);
 }
 
 function call(type, payload = {}) {
@@ -76,7 +78,7 @@ function loadState(s) {
   setLanguage(s.settings.language);
   applyI18n();
   fillSelectors();
-  $('#noKey').hidden = s.settings.hasKey || s.auth?.oauth;
+  renderAuth();
   renderHistory(s.messages || []);
   setStatus(s.session.status);
 }
@@ -84,6 +86,44 @@ function loadState(s) {
 async function refreshConversations() {
   try { const s = await call('state'); state.conversations = s.conversations; state.shortcuts = s.shortcuts; state.tasks = s.tasks; } catch { /* ignore */ }
 }
+
+function renderAuth() {
+  const a = state.auth || {};
+  const ready = !!a.ready;
+  $('#signIn').hidden = ready;
+  $('#examples').hidden = !ready;
+  $('#input').disabled = !ready;
+  $('#account').hidden = !a.infera;
+  if (a.infera) {
+    const acc = a.account || {};
+    $('#accountText').textContent = `${t('signedInAs')} ${acc.displayName || acc.email || ''}${acc.organizationName ? ` · ${acc.organizationName}` : ''}`;
+  }
+  $('#noProvider').hidden = !(a.infera && a.providerConfigured === false);
+  const server = $('#siServer');
+  if (!ready) {
+    server.value = a.server || '';
+    server.hidden = !!a.server;
+    $('#siChangeServer').hidden = !a.server || state.canChangeServer === false;
+  }
+}
+
+$('#signIn').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('#siError');
+  err.hidden = true;
+  $('#siSubmit').disabled = true;
+  try {
+    loadState(await call('infera_sign_in', { email: $('#siEmail').value, password: $('#siPassword').value, server: $('#siServer').hidden ? undefined : $('#siServer').value }));
+    $('#siPassword').value = '';
+  } catch (x) {
+    err.textContent = x.message;
+    err.hidden = false;
+  } finally {
+    $('#siSubmit').disabled = false;
+  }
+});
+$('#siChangeServer').addEventListener('click', () => { $('#siServer').hidden = false; $('#siServer').focus(); });
+$('#btnSignOut').addEventListener('click', async () => loadState(await call('sign_out')));
 
 function fillSelectors() {
   const ms = $('#modelSel');

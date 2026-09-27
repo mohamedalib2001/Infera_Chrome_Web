@@ -7,6 +7,7 @@
     "blocklist": { "type": "array", "items": { "type": "string" }, "title": "Domains that are always blocked" },
     "defaultPermissionMode": { "type": "string", "enum": ["ask", "auto", "follow_a_plan", "skip_all_permission_checks"], "title": "Default permission mode" },
     "disableSkipAllApprovals": { "type": "boolean", "title": "Hide the 'Skip all approvals' mode" },
+    "inferaUrl": { "type": "string", "title": "Infera Agent server URL users sign in to" },
     "apiBaseUrl": { "type": "string", "title": "Model API base URL" },
     "relayUrl": { "type": "string", "title": "Cloud bridge relay URL (wss://)" }
   }

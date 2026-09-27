@@ -3,7 +3,7 @@
 // Works with api.anthropic.com or any Anthropic-compatible gateway (apiBaseUrl).
 import { MODELS } from './constants.js';
 import { getSettings } from './storage.js';
-import { getAccessToken } from './auth.js';
+import { getModelAuth, handleInferaUnauthorized } from './auth.js';
 
 const API_VERSION = '2023-06-01';
 // Optional request features; each is dropped automatically (and remembered for
@@ -22,16 +22,22 @@ async function authHeaders(settings) {
   const h = {
     'content-type': 'application/json',
     'anthropic-version': API_VERSION,
-    'anthropic-dangerous-direct-browser-access': 'true',
   };
-  const token = await getAccessToken();
-  if (token) {
-    h.authorization = `Bearer ${token}`;
-    return { headers: h, betas: ['oauth-2025-04-20'] };
+  const auth = await getModelAuth();
+  if (auth.mode === 'infera') {
+    // Infera Agent gateway: the session token authenticates the user; the
+    // organisation's provider key is added server-side.
+    h.authorization = `Bearer ${auth.token}`;
+    return { headers: h, betas: [], baseUrl: auth.baseUrl, mode: 'infera' };
   }
-  if (!settings.apiKey) throw new Error('No API key configured. Open Infera Agent settings and add an API key, or sign in.');
+  h['anthropic-dangerous-direct-browser-access'] = 'true';
+  if (auth.mode === 'oauth') {
+    h.authorization = `Bearer ${auth.token}`;
+    return { headers: h, betas: ['oauth-2025-04-20'], baseUrl: settings.apiBaseUrl, mode: 'oauth' };
+  }
+  if (!settings.apiKey) throw new Error('Sign in with your Infera Agent account to start (side panel → Sign in).');
   h['x-api-key'] = settings.apiKey;
-  return { headers: h, betas: [] };
+  return { headers: h, betas: [], baseUrl: settings.apiBaseUrl, mode: 'apikey' };
 }
 
 function buildBody({ model, system, messages, tools, maxTokens, effort, quick, stream = true }) {
@@ -79,11 +85,16 @@ function featureFromError(msg) {
 
 async function post(path, reqBody, betas, signal) {
   const settings = await getSettings();
-  const { headers, betas: authBetas } = await authHeaders(settings);
+  const { headers, betas: authBetas, baseUrl, mode } = await authHeaders(settings);
   const allBetas = [...new Set([...authBetas, ...betas])];
   if (allBetas.length) headers['anthropic-beta'] = allBetas.join(',');
-  const url = settings.apiBaseUrl.replace(/\/+$/, '') + path;
-  return fetch(url, { method: 'POST', headers, body: JSON.stringify(reqBody), signal });
+  const url = baseUrl.replace(/\/+$/, '') + path;
+  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(reqBody), signal });
+  if (mode === 'infera' && res.status === 401) {
+    await handleInferaUnauthorized();
+    throw new ApiError(401, 'authentication_error', 'Your Infera Agent session has expired. Sign in again from the side panel.');
+  }
+  return res;
 }
 
 class ApiError extends Error {

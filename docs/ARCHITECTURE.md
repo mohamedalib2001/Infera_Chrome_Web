@@ -53,6 +53,13 @@ relay client (`relay.js`), remote MCP client (`remote-mcp.js`), scheduler
 * Every user message carries a `<tab_context>` JSON block (`availableTabs`, `initialTabId`) with an
   explicit note that titles/URLs are page-authored, untrusted content.
 
+Accounts: users sign in with their **Infera Agent account** (`POST /v1/sessions` on the Infera Agent
+server, `auth.js`); model requests then go to the Infera Agent gateway
+`/v1/browser-agent/v1/messages`, which adds the organisation's provider key server-side and relays the
+stream (Infera_Agent `packages/agent/browser-agent.ts`). No provider key is stored in the browser. A
+personal API key / OAuth remain as developer options. The server URL is baked in at build time
+(`config.js`, `scripts/build-store.mjs`) or set by policy (`inferaUrl`).
+
 Model API: Anthropic Messages API over HTTPS with SSE (`llm.js`; no bundler, so the wire protocol is
 used directly with `anthropic-dangerous-direct-browser-access`). Default model `claude-opus-5` with
 adaptive thinking (summarised), `output_config.effort`, server-side refusal fallbacks, context editing

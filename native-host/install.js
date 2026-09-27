@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 // Registers the Infera Agent native messaging host for Chromium browsers.
-//   node install.js [--extension-id <id>] [--desktop] [--uninstall] [--browsers chrome,edge,brave,...]
+//   node install.js [--extension-id <id>[,<id>…]] [--desktop] [--uninstall] [--browsers chrome,edge,brave,...]
+// Pass the Chrome Web Store ID once published (comma-separate to also keep the development ID).
 // Writes <host>.json manifests into each browser's NativeMessagingHosts folder
 // (macOS/Linux) or registry key HKCU\Software\<Vendor>\<Browser>\NativeMessagingHosts (Windows).
 const fs = require('fs');
@@ -12,7 +13,7 @@ const { HOST_CODE, HOST_DESKTOP, DEFAULT_EXTENSION_ID } = require('./lib/common'
 
 const args = process.argv.slice(2);
 const val = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
-const extId = val('--extension-id') || DEFAULT_EXTENSION_ID;
+const extIds = (val('--extension-id') || DEFAULT_EXTENSION_ID).split(',').map((x) => x.trim()).filter(Boolean);
 const hostName = args.includes('--desktop') ? HOST_DESKTOP : HOST_CODE;
 const uninstall = args.includes('--uninstall');
 const only = val('--browsers')?.split(',').map((s) => s.trim().toLowerCase());
@@ -70,12 +71,12 @@ function manifest(binPath) {
     description: 'Infera Agent browser bridge (MCP server: infera-in-chrome)',
     path: binPath,
     type: 'stdio',
-    allowed_origins: [`chrome-extension://${extId}/`],
+    allowed_origins: extIds.map((id) => `chrome-extension://${id}/`),
   };
 }
 
 function main() {
-  if (!/^[a-p]{32}$/.test(extId)) throw new Error(`Invalid extension id: ${extId}`);
+  for (const id of extIds) if (!/^[a-p]{32}$/.test(id)) throw new Error(`Invalid extension id: ${id}`);
   const done = [];
   if (process.platform === 'win32') {
     const dir = path.join(home, '.infera', 'chrome');
@@ -109,7 +110,7 @@ function main() {
       done.push(`${name}: ${file}`);
     }
   }
-  console.log(`${uninstall ? 'Removed' : 'Registered'} ${hostName} for extension ${extId}:`);
+  console.log(`${uninstall ? 'Removed' : 'Registered'} ${hostName} for extension ${extIds.join(', ')}:`);
   for (const d of done) console.log('  - ' + d);
   if (!done.length) console.log('  (no supported browser profile found — pass --browsers chrome to force)');
   if (!uninstall) {

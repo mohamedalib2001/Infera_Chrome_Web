@@ -23,6 +23,10 @@ const STR = {
     noHistory: 'No conversations yet.', tokensSaved: 'tokens saved by compaction', captureRegion: 'Drag to select a region, or use the full screenshot',
     useFull: 'Use full screenshot', useRegion: 'Use selection', you: 'You', tool: 'Tool', result: 'Result', copy: 'Copy',
     injection: 'Content on web pages is treated as untrusted data.', blockedTitle: 'Blocked',
+    signInTitle: 'Sign in to Infera Agent', signInHint: 'Use your Infera Agent account. No API key is needed.',
+    email: 'Email', password: 'Password', server: 'Infera Agent server (https://…)', signIn: 'Sign in', signOut: 'Sign out',
+    changeServer: 'Change server', useOwnKey: 'Use my own API key', signedInAs: 'Signed in as',
+    noProvider: 'Your organization has not set up a model provider in Infera Agent yet. Ask an administrator to add it.',
   },
   ar: {
     appName: 'إنفرا إيجنت',
@@ -47,6 +51,10 @@ const STR = {
     noHistory: 'لا توجد محادثات بعد.', tokensSaved: 'رمز وُفِّرت بالضغط', captureRegion: 'اسحب لتحديد منطقة، أو استخدم اللقطة كاملة',
     useFull: 'استخدام اللقطة كاملة', useRegion: 'استخدام التحديد', you: 'أنت', tool: 'أداة', result: 'النتيجة', copy: 'نسخ',
     injection: 'محتوى صفحات الويب يُعامَل كبيانات غير موثوقة.', blockedTitle: 'محظور',
+    signInTitle: 'سجّل الدخول إلى إنفرا إيجنت', signInHint: 'استخدم حسابك على إنفرا إيجنت، ولا تحتاج إلى مفتاح API.',
+    email: 'البريد الإلكتروني', password: 'كلمة المرور', server: 'خادم إنفرا إيجنت (https://…)', signIn: 'تسجيل الدخول', signOut: 'تسجيل الخروج',
+    changeServer: 'تغيير الخادم', useOwnKey: 'استخدام مفتاح API خاص بي', signedInAs: 'مسجّل الدخول باسم',
+    noProvider: 'لم تُضِف مؤسستك مزوّد النموذج في إنفرا إيجنت بعد. اطلب من المسؤول إضافته.',
   },
 };
 

@@ -1,8 +1,100 @@
-// Optional OAuth 2.0 PKCE sign-in against an Infera (or other) authorization
-// server. Configured in Settings -> Account. When no OAuth server is set, the
-// agent uses the API key from settings instead.
+// Authentication, in order of preference:
+//   1. Infera Agent account — email + password against the Infera Agent API
+//      (POST /v1/sessions). Model calls then go through the Infera gateway
+//      (/v1/browser-agent), so no provider key ever reaches the browser.
+//   2. OAuth 2.0 PKCE against a configured authorization server.
+//   3. A personal API key (developer mode, Settings -> Advanced).
 import { STORAGE_KEYS } from './constants.js';
 import { getLocal, setLocal, getSettings, getManagedPolicy } from './storage.js';
+import { INFERA_API_URL } from '../config.js';
+
+// ---------------- Infera Agent account ----------------
+export async function inferaServer() {
+  const s = await getSettings();
+  const policy = await getManagedPolicy();
+  return String(policy.inferaUrl || s.inferaUrl || INFERA_API_URL || '').replace(/\/+$/, '');
+}
+
+async function inferaFetch(base, path, { method = 'GET', token, body } = {}) {
+  let res;
+  try {
+    res = await fetch(base + path, {
+      method,
+      headers: { ...(body ? { 'content-type': 'application/json' } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch {
+    throw new Error(`Cannot reach the Infera Agent server at ${base}.`);
+  }
+  const text = await res.text();
+  let json = null;
+  try { json = text ? JSON.parse(text) : null; } catch { /* not JSON */ }
+  if (!res.ok) {
+    const err = new Error(json?.error?.message || `Infera Agent server returned ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  return json;
+}
+
+export async function inferaSignIn({ email, password, server }) {
+  if (server) {
+    const clean = String(server).trim().replace(/\/+$/, '');
+    if (!/^https:\/\//i.test(clean) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(clean)) {
+      throw new Error('The Infera Agent server address must start with https://');
+    }
+    const cur = await getLocal(STORAGE_KEYS.SETTINGS, {});
+    await setLocal(STORAGE_KEYS.SETTINGS, { ...cur, inferaUrl: clean });
+  }
+  const base = await inferaServer();
+  if (!base) throw new Error('Enter your Infera Agent server address.');
+  if (!email || !password) throw new Error('Enter your email and password.');
+  const session = await inferaFetch(base, '/v1/sessions', { method: 'POST', body: { email: String(email).trim(), password } });
+  const me = await inferaFetch(base, '/v1/browser-agent/me', { token: session.token }).catch(() => null);
+  await setLocal(STORAGE_KEYS.AUTH, {
+    kind: 'infera',
+    server: base,
+    accessToken: session.token,
+    expiresAt: session.expiresAt ? Date.parse(session.expiresAt) : null,
+    organizationId: session.organizationId,
+    account: me ? { email: me.email, displayName: me.displayName, organizationName: me.organizationName } : { email: String(email).trim() },
+    providerConfigured: me?.providerConfigured ?? null,
+  });
+  return authStatus();
+}
+
+export async function refreshInferaAccount() {
+  const a = await getLocal(STORAGE_KEYS.AUTH, null);
+  if (a?.kind !== 'infera') return null;
+  try {
+    const me = await inferaFetch(a.server, '/v1/browser-agent/me', { token: a.accessToken });
+    await setLocal(STORAGE_KEYS.AUTH, { ...a, providerConfigured: me.providerConfigured, account: { email: me.email, displayName: me.displayName, organizationName: me.organizationName } });
+  } catch (e) {
+    if (e.status === 401) await chrome.storage.local.remove(STORAGE_KEYS.AUTH);
+  }
+  return authStatus();
+}
+
+// What the model client should use for this request.
+export async function getModelAuth() {
+  const a = await getLocal(STORAGE_KEYS.AUTH, null);
+  if (a?.kind === 'infera' && a.accessToken) {
+    if (a.expiresAt && Date.now() > a.expiresAt) {
+      await chrome.storage.local.remove(STORAGE_KEYS.AUTH);
+      throw new Error('Your Infera Agent session has expired. Sign in again from the side panel.');
+    }
+    return { mode: 'infera', baseUrl: `${a.server}/v1/browser-agent`, token: a.accessToken };
+  }
+  const token = await getAccessToken();
+  if (token) return { mode: 'oauth', token };
+  return { mode: 'apikey' };
+}
+
+export async function handleInferaUnauthorized() {
+  const a = await getLocal(STORAGE_KEYS.AUTH, null);
+  if (a?.kind === 'infera') await chrome.storage.local.remove(STORAGE_KEYS.AUTH);
+}
 
 function b64url(bytes) {
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -81,6 +173,7 @@ async function saveTokens(t) {
 export async function getAccessToken() {
   const a = await getLocal(STORAGE_KEYS.AUTH, null);
   if (!a?.accessToken) return null;
+  if (a.kind === 'infera') return a.expiresAt && Date.now() > a.expiresAt ? null : a.accessToken;
   if (a.expiresAt && Date.now() > a.expiresAt) {
     if (!a.refreshToken) return null;
     const s = await getSettings();
@@ -96,11 +189,25 @@ export async function getAccessToken() {
 }
 
 export async function signOut() {
+  const a = await getLocal(STORAGE_KEYS.AUTH, null);
+  if (a?.kind === 'infera') {
+    await inferaFetch(a.server, '/v1/sessions/current', { method: 'DELETE', token: a.accessToken }).catch(() => {});
+  }
   await chrome.storage.local.remove(STORAGE_KEYS.AUTH);
 }
 
 export async function authStatus() {
   const a = await getLocal(STORAGE_KEYS.AUTH, null);
   const s = await getSettings();
-  return { oauth: !!a?.accessToken, account: a?.account || null, apiKey: !!s.apiKey };
+  const infera = a?.kind === 'infera' && !!a.accessToken && !(a.expiresAt && Date.now() > a.expiresAt);
+  return {
+    infera,
+    oauth: !infera && !!a?.accessToken,
+    signedIn: !!a?.accessToken,
+    account: a?.account || null,
+    providerConfigured: infera ? a.providerConfigured : null,
+    server: await inferaServer(),
+    apiKey: !!s.apiKey,
+    ready: infera || !!a?.accessToken || !!s.apiKey,
+  };
 }

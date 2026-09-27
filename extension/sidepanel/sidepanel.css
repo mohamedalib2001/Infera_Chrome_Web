@@ -105,3 +105,12 @@ dialog.capture::backdrop { background: rgba(0, 0, 0, .45); }
 .capture-stage { position: relative; user-select: none; cursor: crosshair; }
 .capture-stage img { width: 100%; display: block; border-radius: 8px; }
 .sel { position: absolute; border: 2px solid var(--brand); background: rgba(75, 60, 240, .15); }
+
+.signin { margin-top: 18px; width: min(100%, 340px); padding: 16px; display: grid; gap: 8px; text-align: start; box-shadow: none; }
+.signin strong { font-size: 15px; }
+.signin p { margin: 0 0 4px; font-size: 12.5px; max-width: none; }
+.si-error { font-size: 12.5px; color: var(--danger); background: var(--danger-soft); border-radius: 8px; padding: 6px 8px; }
+.si-links { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.linkish { border: 0; background: none; padding: 0; color: var(--brand); cursor: pointer; font-size: 12.5px; }
+.linkish:hover { text-decoration: underline; }
+.account { margin-top: 14px; font-size: 12.5px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; }

@@ -40,16 +40,30 @@
     <img src="../icons/logo.png" alt="" class="hero">
     <h2 data-i18n="emptyTitle"></h2>
     <p class="muted" data-i18n="emptyHint"></p>
-    <div class="examples">
+    <div class="examples" id="examples">
       <button class="chip" data-i18n="ex1"></button>
       <button class="chip" data-i18n="ex2"></button>
       <button class="chip" data-i18n="ex3"></button>
       <button class="chip" data-i18n="ex4"></button>
     </div>
-    <div id="noKey" class="notice" hidden>
-      <span data-i18n="noKey"></span>
-      <button class="btn small" id="btnOpenSettings" data-i18n="openSettings"></button>
+    <form id="signIn" class="card signin" hidden>
+      <strong data-i18n="signInTitle"></strong>
+      <p class="muted" data-i18n="signInHint"></p>
+      <input id="siEmail" type="email" autocomplete="username" required data-i18n-placeholder="email">
+      <input id="siPassword" type="password" autocomplete="current-password" required data-i18n-placeholder="password">
+      <input id="siServer" type="url" data-i18n-placeholder="server" hidden>
+      <button class="btn primary" id="siSubmit" type="submit" data-i18n="signIn"></button>
+      <div id="siError" class="si-error" hidden></div>
+      <div class="si-links">
+        <button type="button" class="linkish" id="siChangeServer" data-i18n="changeServer"></button>
+        <button type="button" class="linkish" id="btnOpenSettings" data-i18n="useOwnKey"></button>
+      </div>
+    </form>
+    <div id="account" class="account" hidden>
+      <span id="accountText"></span>
+      <button type="button" class="linkish" id="btnSignOut" data-i18n="signOut"></button>
     </div>
+    <div id="noProvider" class="notice" hidden><span data-i18n="noProvider"></span></div>
   </section>
 
   <footer class="composer">

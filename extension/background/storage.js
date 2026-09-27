@@ -2,7 +2,8 @@
 import { STORAGE_KEYS, DEFAULT_MODEL, PERMISSION_MODES } from './constants.js';
 
 export const DEFAULT_SETTINGS = {
-  apiKey: '',
+  inferaUrl: '',   // Infera Agent server; defaults to config.js INFERA_API_URL
+  apiKey: '',      // developer mode only
   apiBaseUrl: 'https://api.anthropic.com',
   model: DEFAULT_MODEL,
   effort: 'high',
