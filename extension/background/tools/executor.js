@@ -151,7 +151,7 @@ async function pageSignalsNote(tabId) {
 
 function normalizeUrl(u) {
   u = String(u).trim();
-  if (/^(back|forward)$/i.test(u)) return u.toLowerCase();
+  if (/^(back|forward|reload)$/i.test(u)) return u.toLowerCase();
   if (/^[a-z][a-z0-9+.-]*:/i.test(u)) return u;
   return 'https://' + u;
 }
@@ -201,6 +201,9 @@ const impl = {
     if (url === 'back' || url === 'forward') {
       await authorize(ctx, tab, P.NAVIGATE, `Go ${url} in history on ${tab.title || tab.url}`);
       if (url === 'back') await chrome.tabs.goBack(tabId); else await chrome.tabs.goForward(tabId);
+    } else if (url === 'reload') {
+      await authorize(ctx, tab, P.NAVIGATE, `Reload ${tab.title || tab.url}`);
+      await chrome.tabs.reload(tabId);
     } else {
       if (!/^(https?|file|about|data):/i.test(url) && !url.startsWith('chrome://newtab')) fail(`Unsupported URL scheme: ${url}`);
       const c = await classifyUrl(url);
@@ -276,8 +279,31 @@ const impl = {
         if (!okScroll) fail(`Element ${input.ref} not found. Call read_page or find again.`);
         return ok(text(`Scrolled ${input.ref} into view.`));
       }
-      case 'left_click': case 'right_click': case 'double_click': case 'triple_click': case 'hover': {
+      case 'left_mouse_down': case 'left_mouse_up': {
+        // Browser toolset only: a press or release on its own (custom drags, sliders).
         const t = await targetFromInput(tabId, input);
+        const hb = hardBlockReason(t.desc);
+        if (hb) fail(hb);
+        const netloc = await authorize(ctx, tab, P.CLICK, `Mouse ${a === 'left_mouse_down' ? 'press' : 'release'} at ${t.label} on ${tab.title || tab.url}`, { target: t.desc });
+        await reverify(tabId, netloc);
+        await withOverlayHidden(tabId, () => cdp.mouseButton(tabId, a === 'left_mouse_down' ? 'down' : 'up', t.css[0], t.css[1], { modifiers: mods }));
+        await sleep(100);
+        return ok(text(`Mouse ${a === 'left_mouse_down' ? 'pressed' : 'released'} at ${t.label}.`));
+      }
+      case 'hold_key': {
+        if (!input.text) fail('hold_key requires "text".');
+        const s = Math.min(WAIT_MAX_SECONDS, Math.max(0, Number(input.duration ?? 1)));
+        const netloc = await authorize(ctx, tab, P.TYPE, `Hold ${input.text} for ${s}s on ${tab.title || tab.url}`);
+        await reverify(tabId, netloc);
+        await cdp.holdKey(tabId, input.text, s * 1000);
+        return ok(text(`Held ${input.text} for ${s}s.`));
+      }
+      case 'left_click': case 'right_click': case 'middle_click': case 'double_click': case 'triple_click': case 'hover': case 'mouse_move': {
+        const t = await targetFromInput(tabId, input);
+        if (a === 'mouse_move') {
+          await withOverlayHidden(tabId, () => cdp.mouseMove(tabId, t.css[0], t.css[1], mods));
+          return ok(text(`Moved the mouse to ${t.label}.`));
+        }
         if (a !== 'hover') {
           const hb = hardBlockReason(t.desc);
           if (hb) fail(hb);
@@ -291,7 +317,7 @@ const impl = {
         await withOverlayHidden(tabId, async () => {
           if (a === 'hover') await cdp.mouseMove(tabId, t.css[0], t.css[1], mods);
           else await cdp.click(tabId, t.css[0], t.css[1], {
-            button: a === 'right_click' ? 'right' : 'left',
+            button: a === 'right_click' ? 'right' : a === 'middle_click' ? 'middle' : 'left',
             clickCount: a === 'double_click' ? 2 : a === 'triple_click' ? 3 : 1,
             modifiers: mods,
           });
@@ -618,15 +644,17 @@ async function jpegToPng(b64) {
 }
 
 // ---------- entry point ----------
-export async function executeTool(name, input, ctx) {
+// internal: the call was built by the browser toolset adapter (its members are
+// validated by the API and its tab changes are reported in browser_state).
+export async function executeTool(name, input, ctx, { internal = false } = {}) {
   const def = TOOL_BY_NAME[name];
   const fn = impl[name];
   if (!def || !fn) return { content: [text(`Unknown tool "${name}".`)], isError: true };
-  const invalid = validateInput(def.input_schema, input);
+  const invalid = internal ? null : validateInput(def.input_schema, input);
   if (invalid) return { content: [text(`Invalid input for ${name}: ${invalid}`)], isError: true };
   try {
     const res = await fn(ctx, input || {});
-    const reminder = ctx.inBatch ? '' : await tabGroups.changeReminder(ctx.sessionId).catch(() => '');
+    const reminder = ctx.inBatch || internal ? '' : await tabGroups.changeReminder(ctx.sessionId).catch(() => '');
     if (reminder) res.content.push(text(reminder));
     return res;
   } catch (e) {

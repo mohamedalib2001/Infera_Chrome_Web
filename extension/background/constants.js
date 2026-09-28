@@ -49,12 +49,17 @@ export const RELAY_HEARTBEAT_MS = 25_000;
 export const COMPACT_THRESHOLD_BYTES = 25 * 1024 * 1024;
 
 // Models (Anthropic Messages API). Default follows the current flagship.
+//   browser:   supports Anthropic's trained browser toolset (browser_toolset_20260801)
+//   preserved: thinking blocks are bound to the conversation prefix ("preserved thinking")
+//   fallbacks: server-side refusal fallbacks
 export const MODELS = [
-  { id: 'claude-opus-5', label: 'Claude Opus 5', thinking: 'adaptive', fast: true },
-  { id: 'claude-opus-5[fast]', label: 'Claude Opus 5 [fast] — Quick Mode', thinking: 'adaptive', fast: true, quick: true },
-  { id: 'claude-sonnet-5', label: 'Claude Sonnet 5', thinking: 'adaptive' },
+  { id: 'claude-opus-5', label: 'Claude Opus 5', thinking: 'adaptive', fast: true, browser: true, fallbacks: true },
+  { id: 'claude-opus-5-5', label: 'Claude Opus 5.5', thinking: 'always', fast: true, browser: true, preserved: true, fallbacks: true },
+  { id: 'claude-fable-5-1', label: 'Claude Fable 5.1 — most capable', thinking: 'always', browser: true, preserved: true, fallbacks: true },
+  { id: 'claude-sonnet-5', label: 'Claude Sonnet 5', thinking: 'adaptive', browser: true },
   { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', thinking: 'none' },
-  { id: 'claude-fable-5-1', label: 'Claude Fable 5.1', thinking: 'always' },
+  { id: 'claude-opus-5[fast]', label: 'Claude Opus 5 [fast] — Quick Mode', thinking: 'adaptive', fast: true, quick: true, fallbacks: true },
+  { id: 'claude-opus-5-5[fast]', label: 'Claude Opus 5.5 [fast] — Quick Mode', thinking: 'always', fast: true, quick: true, preserved: true, fallbacks: true },
 ];
 export const DEFAULT_MODEL = 'claude-opus-5';
 export const HELPER_MODEL = 'claude-haiku-4-5'; // find tool, step descriptions, safety checker

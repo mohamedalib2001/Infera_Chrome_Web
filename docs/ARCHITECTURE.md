@@ -98,6 +98,27 @@ work area), `webNavigation` (blocked-category interception, domain transitions, 
 `declarativeNetRequestWithHostAccess` (identifies the client to Infera endpoints, `rules/dnr_rules.json`),
 `offscreen`, `nativeMessaging`, `downloads`, `unlimitedStorage`; host permission `<all_urls>`.
 
+## Anthropic browser toolset — `tools/browser-toolset.js`
+
+With models that support it (Claude Opus 5.5, Opus 5, Fable 5.1, Sonnet 5) the side-panel agent offers
+Anthropic's **browser use toolset** (`browser_toolset_20260801`) instead of its own browsing tools — the
+tool surface current models are trained on. Every member call (`navigate`, `screenshot`, `zoom`, clicks,
+`mouse_move`, `left_mouse_down/up`, `scroll`, `scroll_to`, `type`, `key`, `hold_key`, `wait`, `read_page`,
+`find`, `get_page_text`, `form_input`, `read_console`, `read_network`, `javascript_exec`, `new_tab`,
+`list_tabs`, `switch_tab`, `close_tab`) is mapped onto the same executor, so permissions, domain safety,
+the tab-group boundary, the overlay and GIF recording are unchanged. Results echo
+`toolset_name: "browser"` and carry a `browser_state` block (the group's tabs, `tab_id` = Chrome tab id
+as a string, `tab_opened` changes). Actions in one turn run in order and stop at the first failure
+("Not executed: an earlier action in this turn failed."). `file_upload` stays disabled (it takes local
+paths). Plan, shortcuts, GIF, image upload and window size remain our own tools next to the toolset.
+If an endpoint rejects the toolset, the session falls back to the classic tools below.
+
+Preserved thinking (Opus 5.5 / Fable 5.1): the system prompt and tool list are fixed for a
+conversation (later mode changes and site know-how are appended as `<system-reminder>` notes, never
+edited in), the history is append-only, and requests set
+`thinking.block_binding.prefix_mismatch_behavior: "drop_block"` (beta
+`thinking-binding-controls-2026-08-01`) so a compacted or reloaded history degrades instead of failing.
+
 ## Tools (report §6) — `tools/definitions.js`, `tools/executor.js`
 
 MCP set (17): `tabs_context_mcp`, `tabs_create_mcp`, `tabs_close_mcp`, `navigate`, `computer`

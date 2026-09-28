@@ -7,7 +7,10 @@
 import { streamMessage, modelInfo } from './llm.js';
 import { executeTool } from './tools/executor.js';
 import { PANEL_TOOLS, TOOL_BY_NAME } from './tools/definitions.js';
-import { buildSystem, tabContextBlock } from './prompts.js';
+import {
+  BROWSER_TOOLSET, REPLACED_TOOLS, isToolsetUse, executeMember, toolsetResult, notExecuted,
+} from './tools/browser-toolset.js';
+import { buildSystem, tabContextBlock, domainSkills, MODE_NOTES } from './prompts.js';
 import { tabGroups } from './tab-groups.js';
 import { permissions } from './permissions.js';
 import { cdp } from './cdp.js';
@@ -119,11 +122,15 @@ export class AgentSession {
       if (modelInfo(model).quick) {
         await this.#runQuick({ userText, model, mode, settings, tabs, initialTabId, attachments });
       } else {
+        const toolset = this.#useToolset(model);
+        await this.#ensureSystem({ mode, tabs, toolset });
         const content = [tabContextBlock(tabs, initialTabId)];
+        const note = this.#contextNote(mode, tabs);
+        if (note) content.push({ type: 'text', text: note });
         for (const a of attachments) content.push({ type: 'image', source: { type: 'base64', media_type: a.mediaType, data: a.base64 } });
         content.push({ type: 'text', text: userText });
         this.messages.push({ role: 'user', content });
-        await this.#loop({ model, mode, settings });
+        await this.#loop({ model, mode, settings, toolset });
       }
       if (this.status === 'running') this.setStatus('done');
     } catch (e) {
@@ -173,7 +180,47 @@ export class AgentSession {
     if (last?.role !== 'assistant') return;
     const uses = last.content.filter((b) => b.type === 'tool_use');
     if (!uses.length) return;
-    this.messages.push({ role: 'user', content: uses.map((u) => ({ type: 'tool_result', tool_use_id: u.id, content: reason, is_error: true })) });
+    this.messages.push({ role: 'user', content: uses.map((u) => errorResult(u, reason)) });
+  }
+
+  // ---------- tools & system prompt ----------
+  // Anthropic's browser toolset when the model supports it (models are trained
+  // on it), our own browsing tools otherwise. A conversation that already used
+  // the toolset has to stay on a model that supports it.
+  #usedToolset() {
+    return this.messages.some((m) => m.role === 'assistant' && Array.isArray(m.content) && m.content.some(isToolsetUse));
+  }
+
+  #useToolset(model) {
+    const supported = !!modelInfo(model).browser;
+    if (this.#usedToolset()) {
+      if (!supported) throw new Error('This conversation used browser actions that this model does not support. Choose another model or start a new chat.');
+      return true;
+    }
+    return supported && !this.classicTools;
+  }
+
+  // The system prompt is written once per conversation and never rebuilt, so
+  // the prompt cache stays warm and thinking blocks stay valid; later changes
+  // (another permission mode, a site with extra know-how) are appended to the
+  // conversation as notes instead.
+  async #ensureSystem({ mode, tabs, toolset }) {
+    if (this.system && this.systemToolset === toolset) return;
+    this.system = await buildSystem({ mode, tabs, toolset });
+    this.systemToolset = toolset;
+    this.notedMode = mode;
+    this.notedSkills = new Set(domainSkills(tabs.map((t) => t.url)).map((s) => s.name));
+  }
+
+  #contextNote(mode, tabs) {
+    const notes = [];
+    if (mode !== this.notedMode) { notes.push(`The permission mode changed. ${MODE_NOTES[mode] || ''}`); this.notedMode = mode; }
+    for (const s of domainSkills(tabs.map((t) => t.url))) {
+      if (this.notedSkills.has(s.name)) continue;
+      this.notedSkills.add(s.name);
+      notes.push(`Site knowledge — ${s.name}: ${s.text}`);
+    }
+    return notes.length ? `<system-reminder>${notes.join('\n\n')}</system-reminder>` : '';
   }
 
   #compact() {
@@ -211,22 +258,38 @@ export class AgentSession {
     };
   }
 
-  async #loop({ model, mode, settings }) {
+  async #loop({ model, mode, settings, toolset }) {
     // Remote MCP tools are resolved once per run so the tool list (and the
     // prompt cache prefix) stays stable across turns.
     const remote = await remoteTools().catch(() => []);
     const remoteByName = new Map(remote.map((t) => [t.name, t]));
-    const tools = [...PANEL_TOOLS, ...remote.map(({ _server, _tool, ...t }) => t)]; // eslint-disable-line no-unused-vars
+    const remoteDefs = remote.map(({ _server, _tool, ...t }) => t); // eslint-disable-line no-unused-vars
+    const toolList = (ts) => (ts
+      ? [BROWSER_TOOLSET, ...PANEL_TOOLS.filter((t) => !REPLACED_TOOLS.has(t.name)), ...remoteDefs]
+      : [...PANEL_TOOLS, ...remoteDefs]);
+    let tools = toolList(toolset);
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       if (this.abort.signal.aborted) throw new DOMException('aborted', 'AbortError');
       this.#compact();
-      const tabs = await tabGroups.tabs(this.id);
-      const system = await buildSystem({ mode, tabs });
       this.emit({ type: 'assistant_start' });
-      const msg = await streamMessage(
-        { model, system, messages: this.messages, tools, effort: settings.effort },
-        { signal: this.abort.signal, onEvent: (ev) => this.#forward(ev) },
-      );
+      let msg;
+      try {
+        msg = await streamMessage(
+          { model, system: this.system, messages: this.messages, tools, effort: settings.effort },
+          { signal: this.abort.signal, onEvent: (ev) => this.#forward(ev) },
+        );
+      } catch (e) {
+        // The endpoint does not offer the browser toolset: continue with our own tools.
+        if (toolset && e.status === 400 && /browser_toolset/.test(e.message) && !this.#usedToolset()) {
+          this.classicTools = true;
+          toolset = false;
+          tools = toolList(false);
+          await this.#ensureSystem({ mode, tabs: await tabGroups.tabs(this.id), toolset: false });
+          turn--;
+          continue;
+        }
+        throw e;
+      }
       this.usage.input_tokens += msg.usage.input_tokens || 0;
       this.usage.output_tokens += msg.usage.output_tokens || 0;
       this.emit({ type: 'usage', usage: this.usage });
@@ -246,9 +309,14 @@ export class AgentSession {
       if (!uses.length) return; // end_turn / max_tokens without tools
 
       const results = [];
+      let browserFailed = false; // browser actions run in order and stop at the first failure
       for (const u of uses) {
         if (this.abort.signal.aborted) {
-          results.push({ type: 'tool_result', tool_use_id: u.id, content: 'The user stopped the task.', is_error: true });
+          results.push(errorResult(u, 'The user stopped the task.'));
+          continue;
+        }
+        if (isToolsetUse(u) && browserFailed) {
+          results.push(notExecuted(u));
           continue;
         }
         this.emit({ type: 'tool_start', id: u.id, name: u.name, input: redactInput(u.input) });
@@ -257,6 +325,9 @@ export class AgentSession {
           r = { content: [{ type: 'text', text: 'Tool call was truncated (max_tokens). Retry with a smaller input.' }], isError: true };
         } else if (u._invalidJson !== undefined) {
           r = { content: [{ type: 'text', text: 'INVALID_JSON: the tool input was not valid JSON. Please retry the call.' }], isError: true };
+        } else if (isToolsetUse(u)) {
+          r = await executeMember(u, this.#toolCtx(mode, settings, u.id));
+          if (r.isError) browserFailed = true;
         } else if (remoteByName.has(u.name)) {
           r = await this.#runRemote(remoteByName.get(u.name), u, mode, settings);
         } else if (!TOOL_BY_NAME[u.name]) {
@@ -264,9 +335,12 @@ export class AgentSession {
         } else {
           r = await executeTool(u.name, u.input, this.#toolCtx(mode, settings, u.id));
         }
-        this.emit({ type: 'tool_result', id: u.id, name: u.name, isError: !!r.isError, content: r.content.map(uiBlock) });
-        results.push({ type: 'tool_result', tool_use_id: u.id, content: r.content, ...(r.isError ? { is_error: true } : {}) });
+        this.emit({ type: 'tool_result', id: u.id, name: u.name, isError: !!r.isError, content: r.content.filter((b) => b.type !== 'browser_state').map(uiBlock) });
+        results.push(isToolsetUse(u) ? toolsetResult(u, r) : { type: 'tool_result', tool_use_id: u.id, content: r.content, ...(r.isError ? { is_error: true } : {}) });
       }
+      // New site know-how is appended after the results (never edits the system prompt).
+      const note = this.#contextNote(mode, await tabGroups.tabs(this.id).catch(() => []));
+      if (note) results.push({ type: 'text', text: note });
       // All results in ONE user message.
       this.messages.push({ role: 'user', content: results });
       if (this.abort.signal.aborted) throw new DOMException('aborted', 'AbortError');
@@ -375,6 +449,11 @@ export class AgentSession {
     s.status = 'idle';
     return s;
   }
+}
+
+function errorResult(u, reason) {
+  if (isToolsetUse(u)) return toolsetResult(u, { content: [{ type: 'text', text: reason }], isError: true });
+  return { type: 'tool_result', tool_use_id: u.id, content: reason, is_error: true };
 }
 
 function stripForHistory(b) {

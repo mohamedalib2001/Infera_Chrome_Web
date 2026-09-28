@@ -309,6 +309,36 @@ class CDPManager {
     }
   }
 
+  // Low-level pointer button press/release (browser toolset left_mouse_down / left_mouse_up).
+  async mouseButton(tabId, type, x, y, { button = 'left', modifiers = 0 } = {}) {
+    await this.mouseMove(tabId, x, y, modifiers);
+    await this.send(tabId, 'Input.dispatchMouseEvent', {
+      type: type === 'down' ? 'mousePressed' : 'mouseReleased', x, y, button, clickCount: 1, modifiers,
+      ...(type === 'down' ? { buttons: 1 } : {}),
+    });
+  }
+
+  // Holds a key (or a combo such as "shift+a") down for `ms`, then releases it.
+  async holdKey(tabId, combo, ms) {
+    const parts = combo.split('+').map((s) => s.trim()).filter(Boolean);
+    const keys = parts.map((p) => {
+      const n = MODIFIER_NAMES[p.toLowerCase()];
+      const d = describeKey(n || p);
+      if (!d) throw new Error(`Unknown key: "${p}"`);
+      return { d, bit: n ? MODIFIER_BITS[n] : 0 };
+    });
+    let held = 0;
+    for (const { d, bit } of keys) {
+      held |= bit;
+      await this.send(tabId, 'Input.dispatchKeyEvent', { type: 'rawKeyDown', key: d.key, code: d.code, windowsVirtualKeyCode: d.keyCode, modifiers: held });
+    }
+    await sleep(ms);
+    for (const { d, bit } of keys.reverse()) {
+      held &= ~bit;
+      await this.send(tabId, 'Input.dispatchKeyEvent', { type: 'keyUp', key: d.key, code: d.code, windowsVirtualKeyCode: d.keyCode, modifiers: held });
+    }
+  }
+
   async evaluate(tabId, expression) {
     const r = await this.send(tabId, 'Runtime.evaluate', {
       expression, replMode: true, awaitPromise: true, returnByValue: true, userGesture: true, timeout: 30_000,

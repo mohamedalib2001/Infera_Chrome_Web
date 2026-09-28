@@ -44,18 +44,26 @@ function buildBody({ model, system, messages, tools, maxTokens, effort, quick, s
   } else if (tools?.length) {
     body.tools = tools.map((t, i) => ({
       ...t,
-      ...(stream && !disabledFeatures.has('eager_input_streaming') ? { eager_input_streaming: true } : {}),
+      // Toolsets (e.g. browser_toolset_20260801) are not client-defined tools.
+      ...(stream && !t.type && !disabledFeatures.has('eager_input_streaming') ? { eager_input_streaming: true } : {}),
       ...(i === tools.length - 1 ? { cache_control: { type: 'ephemeral' } } : {}),
     }));
   }
 
   if (info.thinking === 'adaptive' || info.thinking === 'always') {
     body.thinking = { type: 'adaptive', display: 'summarized' };
+    // Preserved thinking: if the history was edited (compaction, a reloaded
+    // conversation, a changed tool list), drop stale thinking blocks instead of
+    // failing the request.
+    if (info.preserved && !disabledFeatures.has('block_binding')) {
+      body.thinking.block_binding = { prefix_mismatch_behavior: 'drop_block' };
+      betas.push('thinking-binding-controls-2026-08-01');
+    }
   }
   if (info.thinking !== 'none' && effort && !disabledFeatures.has('output_config')) {
     body.output_config = { effort };
   }
-  if ((id === 'claude-opus-5' || id === 'claude-fable-5-1') && !disabledFeatures.has('fallbacks')) {
+  if (info.fallbacks && !disabledFeatures.has('fallbacks')) {
     body.fallbacks = 'default';
     betas.push('server-side-fallback-2026-07-01');
   }
@@ -67,6 +75,7 @@ function buildBody({ model, system, messages, tools, maxTokens, effort, quick, s
 }
 
 function featureFromError(msg) {
+  if (msg.includes('block_binding') || msg.includes('thinking-binding-controls')) return 'block_binding';
   for (const f of ['fallbacks', 'context_management', 'eager_input_streaming', 'speed', 'output_config']) {
     if (msg.includes(f)) return f;
   }

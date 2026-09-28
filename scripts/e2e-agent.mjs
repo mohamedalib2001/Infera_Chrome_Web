@@ -64,6 +64,32 @@ const server = http.createServer((req, res) => {
           { type: 'content_block_stop', index: 0 },
           { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 10 } }, { type: 'message_stop' }]);
       }
+      if (phase === 'toolset') {
+        // Anthropic browser toolset: member tool_use blocks carry toolset_name "browser".
+        const tu = (index, id, name, input) => [
+          { type: 'content_block_start', index, content_block: { type: 'tool_use', id, name, toolset_name: 'browser', input: {} } },
+          { type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: JSON.stringify(input) } },
+          { type: 'content_block_stop', index },
+        ];
+        const k = j.messages.filter((m) => m.role === 'assistant').length;
+        if (k === 0) {
+          return sse(res, [start('b1'),
+            ...tu(0, 'b_1', 'get_page_text', {}),
+            ...tu(1, 'b_2', 'screenshot', { tab_id: String(globalThis.TAB) }),
+            ...tu(2, 'b_3', 'left_click', { target: { type: 'ref', ref: 'ref_99999' } }),
+            ...tu(3, 'b_4', 'key', { text: 'Enter' }),
+            { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 30 } }, { type: 'message_stop' }]);
+        }
+        if (k === 1) {
+          return sse(res, [start('b2'), ...tu(0, 'b_5', 'new_tab', {}),
+            { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }]);
+        }
+        return sse(res, [start('b3'),
+          { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+          { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Done with the browser toolset.' } },
+          { type: 'content_block_stop', index: 0 },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }]);
+      }
       if (phase === 'remote') {
         if (j.messages.length === 1) {
           return sse(res, [start('r1'),
@@ -126,17 +152,18 @@ await page.goto(`${base}/test.html`);
 const tabId = await sw.evaluate(async (u) => (await chrome.tabs.query({ url: u + '*' }))[0].id, `${base}/test.html`);
 globalThis.TAB = tabId;
 
-const run = (model) => sw.evaluate(async ({ base, tabId, model }) => {
+const run = (model, { classic = true } = {}) => sw.evaluate(async ({ base, tabId, model, classic }) => {
   const I = self.__infera;
   // Signed in with an INFERA Agent session against the local mock gateway.
   await chrome.storage.local.set({ auth: { kind: 'infera', server: base, accessToken: 'inf_test', clientId: 'c1' } });
   await I.updateSettings({ apiKey: 'sk-ignored', apiBaseUrl: 'https://api.anthropic.com', inferaUrl: base, model, permissionMode: 'skip_all_permission_checks', safetyChecker: false, sound: false, notifications: false });
   const s = new I.AgentSession({ kind: 'panel' });
+  s.classicTools = classic; // our own browsing tools instead of Anthropic's browser toolset
   const events = [];
   s.subscribe((e) => events.push(e.type));
   await s.run('What is on this page?', { startTabId: tabId });
   return { status: s.status, events: [...new Set(events)], messages: s.messages.map((m) => ({ role: m.role, types: m.content.map((b) => b.type + (b.type === 'tool_result' ? `:${b.is_error ? 'err' : 'ok'}:${(b.content || []).map((c) => c.type).join('+')}` : '')) })) };
-}, { base, tabId, model });
+}, { base, tabId, model, classic });
 
 const checks = [];
 const check = (name, ok, info = '') => checks.push({ name, ok, info });
@@ -174,6 +201,35 @@ const r3 = await run('claude-opus-5');
 check('remote MCP: tool offered to model', requests[0].body.tools.some((t) => t.name === 'mcp__crm__lookup'));
 check('remote MCP: initialize -> tools/list -> tools/call', ['initialize', 'notifications/initialized', 'tools/list', 'tools/call'].every((m) => mcpCalls.includes(m)), mcpCalls.join(','));
 check('remote MCP: result returned to model', JSON.stringify(requests[1].body.messages.at(-1)).includes('customer Acme: VIP') && r3.status === 'done');
+
+// Anthropic browser toolset (Claude Opus 5.5): mapping, browser_state, batch stop, preserved thinking.
+requests.length = 0;
+phase = 'toolset';
+const rt = await run('claude-opus-5-5', { classic: false });
+const [q1, q2, q3] = requests.map((r) => r.body);
+check('toolset: task done', rt.status === 'done', rt.status);
+check('toolset: browser_toolset_20260801 offered, replaced tools removed',
+  q1.tools[0].type === 'browser_toolset_20260801' && !q1.tools[0].eager_input_streaming && q1.tools[0].configs.javascript_exec.enabled
+  && !q1.tools.some((t) => ['computer', 'navigate', 'read_page', 'find', 'tabs_create', 'browser_batch'].includes(t.name))
+  && q1.tools.some((t) => t.name === 'update_plan') && q1.tools.some((t) => t.name === 'gif_creator'), q1.tools.map((t) => t.name || t.type).join(','));
+check('toolset: preserved thinking drop_block + fallbacks',
+  q1.thinking?.block_binding?.prefix_mismatch_behavior === 'drop_block' && requests[0].headers['anthropic-beta'].includes('thinking-binding-controls-2026-08-01') && q1.fallbacks === 'default' && q1.output_config?.effort === 'high');
+const tr1 = q2.messages.at(-1).content.filter((b) => b.type === 'tool_result');
+check('toolset: every result echoes toolset_name', tr1.length === 4 && tr1.every((b) => b.toolset_name === 'browser'));
+const state1 = tr1[0].content.find((c) => c.type === 'browser_state');
+check('toolset: get_page_text ok with browser_state', !tr1[0].is_error && tr1[0].content[0].text.includes('Infera Test Page') && state1?.tabs.filter((t) => t.active).length === 1 && state1.tabs.some((t) => t.tab_id === String(tabId)), JSON.stringify(state1));
+check('toolset: screenshot returns an image', !tr1[1].is_error && tr1[1].content.some((c) => c.type === 'image'));
+check('toolset: failed action stops the batch', tr1[2].is_error && tr1[3].is_error && /Not executed: an earlier action in this turn failed/.test(JSON.stringify(tr1[3].content)));
+const tr2 = q3.messages.at(-1).content.filter((b) => b.type === 'tool_result');
+check('toolset: new_tab returns exactly one browser_state with tab_opened', tr2.length === 1 && tr2[0].content.length === 1 && tr2[0].content[0].type === 'browser_state' && tr2[0].content[0].state_changes?.[0]?.type === 'tab_opened', JSON.stringify(tr2[0]?.content));
+check('toolset: tool_use blocks sent back with toolset_name', q2.messages[1].content.filter((b) => b.type === 'tool_use').every((b) => b.toolset_name === 'browser'));
+check('system prompt frozen across turns', JSON.stringify(q1.system) === JSON.stringify(q3.system) && JSON.stringify(q1.tools) === JSON.stringify(q3.tools));
+check('history is append-only', JSON.stringify(q3.messages.slice(0, q2.messages.length)) === JSON.stringify(q2.messages));
+await sw.evaluate(async () => { // close the tab the toolset opened
+  const tabs = await chrome.tabs.query({ url: 'about:blank' });
+  for (const t of tabs) await chrome.tabs.remove(t.id).catch(() => {});
+});
+phase = 'normal';
 
 // Without an INFERA Agent session nothing is sent, even with an API key in storage.
 requests.length = 0;
