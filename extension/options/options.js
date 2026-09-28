@@ -16,9 +16,7 @@ const el = (tag, attrs = {}, ...kids) => {
 
 const L = {
   en: {
-    subtitle: 'Settings, permissions and connections', account: 'Infera Agent account', accountHint: 'Sign in with your INFERA Agent account on inferaagent.com. Model requests go through INFERA Agent and are paid from your credits, so no API key is stored in the browser.',
-    advanced: 'Advanced (developers)', advancedHint: 'Use your own API key or OAuth server instead of an Infera Agent account.',
-    apiKey: 'API key', baseUrl: 'API base URL', oauthAuth: 'OAuth authorize URL', oauthToken: 'OAuth token URL', oauthClient: 'OAuth client ID', oauthRedirect: 'OAuth redirect URI',
+    subtitle: 'Settings, permissions and connections', account: 'Infera Agent account', accountHint: 'Sign in with your INFERA Agent account on inferaagent.com. Model requests go through INFERA Agent and are paid from your credits, so no API key is stored in the browser. An INFERA Agent account is required to use the extension.',
     signIn: 'Sign in', signOut: 'Sign out', signedIn: 'Signed in', notSignedIn: 'Not signed in',
     behaviour: 'Agent behaviour', behaviourHint: 'Defaults for new tasks. You can also change the model and approval mode from the side panel.',
     model: 'Default model', effort: 'Effort', mode: 'Approval mode', safety: 'Independent safety checker for each action (Automatically approve mode)', language: 'Interface language',
@@ -35,9 +33,7 @@ const L = {
     srvName: 'Name', srvUrl: 'URL (https://…/mcp)', srvAuth: 'Authorization header (optional)', add: 'Add server', remove: 'Remove', noServers: 'No remote MCP servers.',
   },
   ar: {
-    subtitle: 'الإعدادات والأذونات والاتصالات', account: 'حساب إنفرا إيجنت', accountHint: 'سجّل الدخول بحسابك على inferaagent.com. تمرّ طلبات النموذج عبر إنفرا إيجنت وتُخصم من رصيدك، فلا يُخزَّن أي مفتاح API في المتصفح.',
-    advanced: 'متقدم (للمطوّرين)', advancedHint: 'استخدم مفتاح API خاصًا بك أو خادم OAuth بدلًا من حساب إنفرا إيجنت.',
-    apiKey: 'مفتاح API', baseUrl: 'عنوان واجهة API', oauthAuth: 'رابط التفويض (OAuth)', oauthToken: 'رابط الرمز (OAuth)', oauthClient: 'معرّف العميل (OAuth)', oauthRedirect: 'رابط إعادة التوجيه (OAuth)',
+    subtitle: 'الإعدادات والأذونات والاتصالات', account: 'حساب إنفرا إيجنت', accountHint: 'سجّل الدخول بحسابك على inferaagent.com. تمرّ طلبات النموذج عبر إنفرا إيجنت وتُخصم من رصيدك، فلا يُخزَّن أي مفتاح API في المتصفح. استخدام الإضافة يتطلب حسابًا على إنفرا إيجنت.',
     signIn: 'تسجيل الدخول', signOut: 'تسجيل الخروج', signedIn: 'تم تسجيل الدخول', notSignedIn: 'لم يتم تسجيل الدخول',
     behaviour: 'سلوك الوكيل', behaviourHint: 'الإعدادات الافتراضية للمهام الجديدة، ويمكن تغيير النموذج ووضع الموافقة من اللوحة الجانبية أيضًا.',
     model: 'النموذج الافتراضي', effort: 'مستوى الجهد', mode: 'وضع الموافقة', safety: 'فاحص أمان مستقل لكل إجراء (في وضع الموافقة التلقائية)', language: 'لغة الواجهة',
@@ -83,9 +79,8 @@ async function render() {
       } }, tr('micBtn')), note));
   }
 
-  // Account: Infera Agent sign-in first; personal key / OAuth are developer options.
+  // Account: an INFERA Agent account is the only way to use the extension.
   const auth = await send('auth_status');
-  const server = el('input', { type: 'url', value: auth.server || '', placeholder: 'https://agent.example.com', disabled: policy.inferaUrl ? true : undefined });
   const errA = el('span', { class: 'saved', style: 'color:var(--danger)' });
   const acc = auth.account || {};
   const inferaBlock = auth.infera
@@ -96,34 +91,15 @@ async function render() {
       auth.block ? el('p', { class: 'badge warn', style: 'margin-top:8px' }, t(auth.block === 'monthly_cap' ? 'blockCap' : auth.block === 'consent_required' ? 'blockConsent' : 'blockCredits')) : null,
       el('div', { class: 'actions' }, el('button', { class: 'btn', onclick: async () => { await send('sign_out'); render(); } }, tr('signOut'))))
     : el('div', {},
-      el('div', { class: 'fields' }, field(t('server'), server)),
       el('div', { class: 'actions' }, el('button', { class: 'btn primary', onclick: async () => {
         errA.textContent = '';
-        try { await send('infera_sign_in', { server: policy.inferaUrl ? undefined : server.value }); render(); }
+        try { await send('infera_sign_in'); render(); }
         catch (e) { errA.textContent = e.message; }
       } }, t('signIn')), errA));
 
-  const apiKey = el('input', { type: 'password', value: s.apiKey, autocomplete: 'off', placeholder: 'sk-…' });
-  const baseUrl = el('input', { value: s.apiBaseUrl, disabled: policy.apiBaseUrl ? true : undefined });
-  const oa = el('input', { value: s.oauth.authorizeUrl });
-  const ot = el('input', { value: s.oauth.tokenUrl });
-  const oc = el('input', { value: s.oauth.clientId });
-  const orr = el('input', { value: s.oauth.redirectUri || 'https://infera.ai/oauth/callback' });
-  const savedA = el('span', { class: 'saved' });
   app.append(el('section', { class: 'card' },
     el('h2', {}, tr('account')), el('p', { class: 'muted' }, tr('accountHint')),
-    inferaBlock,
-    el('details', { style: 'margin-top:16px' }, el('summary', { class: 'muted' }, tr('advanced')),
-      el('p', { class: 'muted', style: 'font-size:12.5px' }, tr('advancedHint')),
-      el('div', { class: 'fields' }, field(tr('apiKey'), apiKey), field(tr('baseUrl'), baseUrl)),
-      el('div', { class: 'fields', style: 'margin-top:10px' }, field(tr('oauthAuth'), oa), field(tr('oauthToken'), ot), field(tr('oauthClient'), oc), field(tr('oauthRedirect'), orr)),
-      el('div', { class: 'actions' },
-        el('button', { class: 'btn', onclick: async () => {
-          await send('update_settings', { patch: { apiKey: apiKey.value.trim(), ...(policy.apiBaseUrl ? {} : { apiBaseUrl: baseUrl.value.trim() || 'https://api.anthropic.com' }), oauth: { ...s.oauth, authorizeUrl: oa.value.trim(), tokenUrl: ot.value.trim(), clientId: oc.value.trim(), redirectUri: orr.value.trim() } } });
-          savedA.textContent = tr('saved');
-        } }, tr('save')),
-        el('button', { class: 'btn', onclick: async () => { try { await send('sign_in'); render(); } catch (e) { alert(e.message); } } }, 'OAuth ' + tr('signIn')),
-        savedA))));
+    inferaBlock));
 
   // Behaviour
   const model = select(MODELS, s.model);

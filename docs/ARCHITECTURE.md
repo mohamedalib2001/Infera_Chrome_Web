@@ -58,15 +58,17 @@ Accounts: users sign in with their **INFERA Agent account on inferaagent.com** v
 `auth.js`). Model requests go to `https://inferaagent.com/api/browser-agent/v1/messages`, which checks the
 person's credits, adds the platform key server-side, relays the stream and charges the tokens to the
 person's credits (Infera_Agent `apps/server/src/browserAgent.ts`). No provider key is stored in the
-browser. A personal API key / generic OAuth remain as developer options. The server is baked in at build
-time (`config.js`, `scripts/build-store.mjs`) or set by policy (`inferaUrl`).
+browser. **An INFERA Agent account is the only way to use the extension**: there is no personal API
+key or third-party OAuth option, and a stored session is only accepted for the built-in server. The
+server is baked in at build time (`config.js`, `scripts/build-store.mjs`) and cannot be changed in a
+Web Store install; only an unpacked developer build may point at a local `http://localhost` test server.
 
-Model API: Anthropic Messages API over HTTPS with SSE (`llm.js`; no bundler, so the wire protocol is
-used directly with `anthropic-dangerous-direct-browser-access`). Default model `claude-opus-5` with
+Model API: Anthropic Messages API wire format over HTTPS with SSE (`llm.js`; no bundler, so the wire
+protocol is used directly), always sent to the INFERA Agent gateway. Default model `claude-opus-5` with
 adaptive thinking (summarised), `output_config.effort`, server-side refusal fallbacks, context editing
 (`clear_tool_uses`), prompt caching on tools + system, and `eager_input_streaming` with client-side
-schema validation. Optional features are dropped automatically if a gateway rejects them.
-`apiBaseUrl` lets you point at an Infera gateway. Helper model `claude-haiku-4-5` powers `find`, the
+schema validation. Optional features are dropped automatically if the gateway rejects them.
+Helper model `claude-haiku-4-5` powers `find`, the
 safety checker and workflow-step descriptions.
 
 ## Native messaging bridge (report §4.4)
@@ -129,8 +131,8 @@ only `navigate` works. CAPTCHA and sign-in pages are detected and handed back to
 * Prompt-injection defences: untrusted-data system prompt, hidden/concealed DOM text removed from the
   accessibility tree, tab titles/URLs flagged as untrusted, safety checker, per-site permissions,
   blocklists.
-* Enterprise (`managed_schema.json`): `enabled`, `forceLoginOrgUUID`, `allowlist`, `blocklist`,
-  `defaultPermissionMode`, `disableSkipAllApprovals`, `apiBaseUrl`, `relayUrl`.
+* Enterprise (`managed_schema.json`): `enabled`, `allowlist`, `blocklist`,
+  `defaultPermissionMode`, `disableSkipAllApprovals`, `relayUrl`.
 
 ## Not included
 

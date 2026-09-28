@@ -101,12 +101,6 @@ function renderAuth() {
   }
   $('#noProvider').hidden = !(a.infera && a.block);
   if (a.infera && a.block) $('#noProvider').querySelector('span').textContent = t(a.block === 'monthly_cap' ? 'blockCap' : a.block === 'consent_required' ? 'blockConsent' : 'blockCredits');
-  const server = $('#siServer');
-  if (!ready) {
-    server.value = a.server || '';
-    server.hidden = !!a.server;
-    $('#siChangeServer').hidden = !a.server || state.canChangeServer === false;
-  }
 }
 
 $('#signIn').addEventListener('submit', async (e) => {
@@ -115,7 +109,7 @@ $('#signIn').addEventListener('submit', async (e) => {
   err.hidden = true;
   $('#siSubmit').disabled = true;
   try {
-    loadState(await call('infera_sign_in', { server: $('#siServer').hidden ? undefined : $('#siServer').value }));
+    loadState(await call('infera_sign_in'));
   } catch (x) {
     err.textContent = x.message;
     err.hidden = false;
@@ -123,7 +117,7 @@ $('#signIn').addEventListener('submit', async (e) => {
     $('#siSubmit').disabled = false;
   }
 });
-$('#siChangeServer').addEventListener('click', () => { $('#siServer').hidden = false; $('#siServer').focus(); });
+$('#siCreateAccount').addEventListener('click', () => chrome.tabs.create({ url: `${state.auth?.server || 'https://inferaagent.com'}/` }));
 $('#btnSignOut').addEventListener('click', async () => loadState(await call('sign_out')));
 
 function fillSelectors() {
@@ -410,7 +404,6 @@ $('#modelSel').addEventListener('change', (e) => call('set_model', { model: e.ta
 $('#modeSel').addEventListener('change', (e) => call('set_mode', { mode: e.target.value }));
 $('#btnNew').addEventListener('click', async () => loadState(await call('new_chat')));
 $('#btnSettings').addEventListener('click', () => call('open_settings'));
-$('#btnOpenSettings').addEventListener('click', () => call('open_settings'));
 
 // ---------------- attachments & region capture ----------------
 function fileToB64(file) {

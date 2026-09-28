@@ -88,7 +88,6 @@ node scripts/build-store.mjs --api-url https://inferaagent.com --version 1.0.0
 {
   "ExtensionInstallForcelist": ["<معرّف المتجر>;https://clients2.google.com/service/update2/crx"],
   "3rdparty": { "extensions": { "<معرّف المتجر>": {
-    "inferaUrl": "https://inferaagent.com",
     "blocklist": ["bank.example"],
     "defaultPermissionMode": "ask",
     "disableSkipAllApprovals": true

@@ -2,9 +2,7 @@
 import { STORAGE_KEYS, DEFAULT_MODEL, PERMISSION_MODES } from './constants.js';
 
 export const DEFAULT_SETTINGS = {
-  inferaUrl: '',   // Infera Agent server; defaults to config.js INFERA_API_URL
-  apiKey: '',      // developer mode only
-  apiBaseUrl: 'https://api.anthropic.com',
+  inferaUrl: '',   // unpacked developer builds only: a local test server (see auth.js)
   model: DEFAULT_MODEL,
   effort: 'high',
   permissionMode: PERMISSION_MODES.AUTO,
@@ -16,7 +14,6 @@ export const DEFAULT_SETTINGS = {
   relayUrl: '',
   relayEnabled: false,
   remoteDomainClassifier: '', // optional URL template, e.g. https://api.infera.ai/domain_info?domain={domain}
-  oauth: { authorizeUrl: '', tokenUrl: '', clientId: '', scopes: 'user:profile user:inference' },
   defaultKeepTabs: false,
 };
 
@@ -32,9 +29,11 @@ export async function setLocal(key, value) {
 export async function getSettings() {
   const s = await getLocal(STORAGE_KEYS.SETTINGS, {});
   const managed = await getManagedPolicy();
-  const merged = { ...DEFAULT_SETTINGS, ...s, oauth: { ...DEFAULT_SETTINGS.oauth, ...(s.oauth || {}) } };
+  const merged = { ...DEFAULT_SETTINGS, ...s };
+  // Personal API keys and custom model endpoints are not supported; drop any
+  // left over from an older version.
+  delete merged.apiKey; delete merged.apiBaseUrl; delete merged.oauth;
   if (!s.permissionMode && managed.defaultPermissionMode) merged.permissionMode = managed.defaultPermissionMode;
-  if (managed.apiBaseUrl) merged.apiBaseUrl = managed.apiBaseUrl;
   if (managed.relayUrl) merged.relayUrl = managed.relayUrl;
   if (managed.disableSkipAllApprovals && merged.permissionMode === PERMISSION_MODES.SKIP_ALL) {
     merged.permissionMode = PERMISSION_MODES.AUTO;

@@ -1,6 +1,6 @@
 // Model client — Anthropic Messages API over raw HTTPS (fetch + SSE).
 // The extension ships without a bundler, so the wire protocol is used directly.
-// Works with api.anthropic.com or any Anthropic-compatible gateway (apiBaseUrl).
+// All requests go to the INFERA Agent gateway with the person's account token.
 import { MODELS } from './constants.js';
 import { getSettings } from './storage.js';
 import { getModelAuth, handleInferaUnauthorized } from './auth.js';
@@ -23,21 +23,11 @@ async function authHeaders(settings) {
     'content-type': 'application/json',
     'anthropic-version': API_VERSION,
   };
+  // INFERA Agent gateway only: the session token authenticates the person, the
+  // gateway checks their credits and adds the provider key server-side.
   const auth = await getModelAuth();
-  if (auth.mode === 'infera') {
-    // Infera Agent gateway: the session token authenticates the user; the
-    // organisation's provider key is added server-side.
-    h.authorization = `Bearer ${auth.token}`;
-    return { headers: h, betas: [], baseUrl: auth.baseUrl, mode: 'infera' };
-  }
-  h['anthropic-dangerous-direct-browser-access'] = 'true';
-  if (auth.mode === 'oauth') {
-    h.authorization = `Bearer ${auth.token}`;
-    return { headers: h, betas: ['oauth-2025-04-20'], baseUrl: settings.apiBaseUrl, mode: 'oauth' };
-  }
-  if (!settings.apiKey) throw new Error('Sign in with your Infera Agent account to start (side panel → Sign in).');
-  h['x-api-key'] = settings.apiKey;
-  return { headers: h, betas: [], baseUrl: settings.apiBaseUrl, mode: 'apikey' };
+  h.authorization = `Bearer ${auth.token}`;
+  return { headers: h, betas: [], baseUrl: auth.baseUrl, mode: 'infera' };
 }
 
 function buildBody({ model, system, messages, tools, maxTokens, effort, quick, stream = true }) {

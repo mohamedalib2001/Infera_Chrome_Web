@@ -13,7 +13,7 @@ import { popupApproval, getApproval, answerApproval } from './approvals.js';
 import { listShortcuts, saveShortcut, deleteShortcut, renderShortcut } from './shortcuts.js';
 import { listTasks, saveTask, deleteTask, rearmAll, markRun, taskIdFromAlarm } from './scheduler.js';
 import { startRecording, stopRecording, addStep, recordingState } from './recording.js';
-import { signIn, signOut, authStatus, inferaSignIn, refreshInferaAccount, inferaServer } from './auth.js';
+import { signOut, authStatus, inferaSignIn, refreshInferaAccount, inferaServer } from './auth.js';
 import { overlay } from './page.js';
 import { executeTool } from './tools/executor.js';
 import { listServers, saveServer, deleteServer } from './remote-mcp.js';
@@ -119,8 +119,8 @@ async function panelState(s) {
     session: s.summary(),
     messages: s.messages,
     pending: [],
-    settings: { model: s.modelOverride || settings.model, permissionMode: s.modeOverride || settings.permissionMode, language: settings.language, hasKey: !!settings.apiKey },
-    canChangeServer: !policy.inferaUrl,
+    settings: { model: s.modelOverride || settings.model, permissionMode: s.modeOverride || settings.permissionMode, language: settings.language },
+    canChangeServer: false,
     models: MODELS,
     modes: Object.values(PERMISSION_MODES).filter((m) => !(policy.disableSkipAllApprovals && m === PERMISSION_MODES.SKIP_ALL)),
     conversations: (await getLocal(STORAGE_KEYS.CONVERSATIONS, [])).map(({ id, title, updatedAt, status, kind }) => ({ id, title, updatedAt, status, kind })),
@@ -196,7 +196,7 @@ async function handlePanel(msg, s, port) {
     case 'stop_recording': return stopRecording({ transcript: msg.transcript || '' });
     case 'recording_state': return recordingState();
     case 'open_settings': chrome.runtime.openOptionsPage(); return { ok: true };
-    case 'infera_sign_in': await inferaSignIn({ server: msg.server }); return panelState(s);
+    case 'infera_sign_in': await inferaSignIn(); return panelState(s);
     case 'sign_out': await signOut(); return panelState(s);
     case 'refresh_account': await refreshInferaAccount(); return panelState(s);
     case 'state': return panelState(s);
@@ -226,9 +226,8 @@ async function handleMessage(msg, sender) {
     case 'native_reconnect': await nativeBridge.reconnect(); return nativeBridge.status();
     case 'relay_status': return relay.status();
     case 'auth_status': return authStatus();
-    case 'sign_in': return signIn();
     case 'sign_out': await signOut(); return authStatus();
-    case 'infera_sign_in': return inferaSignIn({ server: msg.server });
+    case 'infera_sign_in': return inferaSignIn();
     case 'refresh_account': return refreshInferaAccount();
     case 'classify': return classifyUrl(msg.url);
     case 'list_mcp_servers': return listServers();

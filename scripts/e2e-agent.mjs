@@ -42,7 +42,7 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
-  if (req.url === '/v1/messages' && req.method === 'POST') {
+  if (req.url === '/api/browser-agent/v1/messages' && req.method === 'POST') {
     let body = '';
     req.on('data', (c) => { body += c; });
     req.on('end', () => {
@@ -128,7 +128,9 @@ globalThis.TAB = tabId;
 
 const run = (model) => sw.evaluate(async ({ base, tabId, model }) => {
   const I = self.__infera;
-  await I.updateSettings({ apiKey: 'sk-test', apiBaseUrl: base, model, permissionMode: 'skip_all_permission_checks', safetyChecker: false, sound: false, notifications: false });
+  // Signed in with an INFERA Agent session against the local mock gateway.
+  await chrome.storage.local.set({ auth: { kind: 'infera', server: base, accessToken: 'inf_test', clientId: 'c1' } });
+  await I.updateSettings({ apiKey: 'sk-ignored', apiBaseUrl: 'https://api.anthropic.com', inferaUrl: base, model, permissionMode: 'skip_all_permission_checks', safetyChecker: false, sound: false, notifications: false });
   const s = new I.AgentSession({ kind: 'panel' });
   const events = [];
   s.subscribe((e) => events.push(e.type));
@@ -144,7 +146,7 @@ check('agent status done', r1.status === 'done', r1.status);
 check('events streamed', ['thinking_delta', 'text_delta', 'tool_start', 'tool_result', 'turn_end'].every((e) => r1.events.includes(e)), r1.events.join(','));
 const req2 = requests[1]?.body;
 check('two API requests', requests.length === 2, String(requests.length));
-check('headers: version + direct browser access + key', requests[0].headers['anthropic-version'] === '2023-06-01' && requests[0].headers['anthropic-dangerous-direct-browser-access'] === 'true' && requests[0].headers['x-api-key'] === 'sk-test');
+check('headers: version + INFERA session token, no API key', requests[0].headers['anthropic-version'] === '2023-06-01' && requests[0].headers.authorization === 'Bearer inf_test' && !requests[0].headers['x-api-key'] && !requests[0].headers['anthropic-dangerous-direct-browser-access']);
 check('adaptive thinking + effort', requests[0].body.thinking?.type === 'adaptive' && requests[0].body.output_config?.effort === 'high');
 check('tools sent w/ eager streaming + cache_control', requests[0].body.tools.length === 23 && requests[0].body.tools[0].eager_input_streaming === true && !!requests[0].body.tools.at(-1).cache_control);
 check('tab context in first user msg', JSON.stringify(requests[0].body.messages[0]).includes('<tab_context>'));
@@ -172,6 +174,21 @@ const r3 = await run('claude-opus-5');
 check('remote MCP: tool offered to model', requests[0].body.tools.some((t) => t.name === 'mcp__crm__lookup'));
 check('remote MCP: initialize -> tools/list -> tools/call', ['initialize', 'notifications/initialized', 'tools/list', 'tools/call'].every((m) => mcpCalls.includes(m)), mcpCalls.join(','));
 check('remote MCP: result returned to model', JSON.stringify(requests[1].body.messages.at(-1)).includes('customer Acme: VIP') && r3.status === 'done');
+
+// Without an INFERA Agent session nothing is sent, even with an API key in storage.
+requests.length = 0;
+const noAuth = await sw.evaluate(async () => {
+  await chrome.storage.local.remove('auth');
+  await self.__infera.updateSettings({ apiKey: 'sk-ant-personal' });
+  const s = new self.__infera.AgentSession({ kind: 'panel' });
+  try { await s.run('hello'); } catch (e) { return { err: e.message, status: s.status }; }
+  return { status: s.status, auth: await self.__infera.authStatus?.() };
+});
+check('API key alone cannot be used', requests.length === 0, JSON.stringify(noAuth));
+await sw.evaluate(async () => {
+  const cur = (await chrome.storage.local.get('settings')).settings || {};
+  await chrome.storage.local.set({ auth: { kind: 'infera', server: cur.inferaUrl, accessToken: 'inf_test', clientId: 'c1' } });
+});
 
 // UI pages render
 const sp = await ctx.newPage();
