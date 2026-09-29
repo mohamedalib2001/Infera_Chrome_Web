@@ -6,7 +6,9 @@
 //               language, we execute the batch, then send a fresh screenshot.
 import { streamMessage, modelInfo } from './llm.js';
 import { executeTool } from './tools/executor.js';
-import { PANEL_TOOLS, TOOL_BY_NAME } from './tools/definitions.js';
+import { PANEL_TOOLS, MEMORY_TOOLS, TOOL_BY_NAME } from './tools/definitions.js';
+import { webTools, SERVER_RESULT_TYPES, summarizeServerResult, citedSources } from './tools/web-tools.js';
+import { listMemory, memoryBlock } from './memory.js';
 import {
   BROWSER_TOOLSET, REPLACED_TOOLS, isToolsetUse, executeMember, toolsetResult, notExecuted,
 } from './tools/browser-toolset.js';
@@ -43,6 +45,7 @@ export class AgentSession {
     this.runShortcut = null;     // injected by service worker
     this.modelOverride = null;
     this.modeOverride = null;
+    this.files = new Map();      // name -> file the user attached (for file_upload)
   }
 
   // ---------- UI plumbing ----------
@@ -123,14 +126,20 @@ export class AgentSession {
         await this.#runQuick({ userText, model, mode, settings, tabs, initialTabId, attachments });
       } else {
         const toolset = this.#useToolset(model);
-        await this.#ensureSystem({ mode, tabs, toolset });
+        const flags = { web: !!modelInfo(model).browser && settings.webResearch !== false && !this.noWebTools, memory: settings.memory !== false };
+        await this.#ensureSystem({ mode, tabs, toolset, ...flags });
         const content = [tabContextBlock(tabs, initialTabId)];
         const note = this.#contextNote(mode, tabs);
         if (note) content.push({ type: 'text', text: note });
-        for (const a of attachments) content.push({ type: 'image', source: { type: 'base64', media_type: a.mediaType, data: a.base64 } });
+        // Long-term memory goes into the first message of a new conversation.
+        if (!this.messages.length && settings.memory !== false) {
+          const mem = memoryBlock(await listMemory().catch(() => []));
+          if (mem) content.push(mem);
+        }
+        content.push(...this.#attachmentBlocks(attachments));
         content.push({ type: 'text', text: userText });
         this.messages.push({ role: 'user', content });
-        await this.#loop({ model, mode, settings, toolset });
+        await this.#loop({ model, mode, settings, toolset, policy });
       }
       if (this.status === 'running') this.setStatus('done');
     } catch (e) {
@@ -183,12 +192,51 @@ export class AgentSession {
     this.messages.push({ role: 'user', content: uses.map((u) => errorResult(u, reason)) });
   }
 
+  // Screenshots are shown to the model; files the user attached are also kept for
+  // file_upload, and PDFs / text files are given to the model to read.
+  #attachmentBlocks(attachments) {
+    const blocks = [];
+    const listed = [];
+    for (const a of attachments) {
+      if (a.kind !== 'file') {
+        blocks.push({ type: 'image', source: { type: 'base64', media_type: a.mediaType, data: a.base64 } });
+        continue;
+      }
+      let name = String(a.name || 'file').replace(/[\\/]/g, '_');
+      for (let i = 2; this.files.has(name) && this.files.get(name).base64 !== a.base64; i++) name = name.replace(/(\.[^.]*)?$/, `-${i}$1`);
+      this.files.set(name, { ...a, name });
+      const kb = Math.max(1, Math.round((a.base64.length * 0.75) / 1024));
+      listed.push(`- /attachments/${name} (${a.mediaType || 'file'}, ${kb} KB)`);
+      if (/^image\/(png|jpeg|gif|webp)$/.test(a.mediaType)) {
+        blocks.push({ type: 'image', source: { type: 'base64', media_type: a.mediaType, data: a.base64 } });
+      } else if (a.mediaType === 'application/pdf') {
+        blocks.push({ type: 'document', title: name, source: { type: 'base64', media_type: 'application/pdf', data: a.base64 } });
+      } else if (/^text\/|json|xml|csv/.test(a.mediaType || '') && a.base64.length < 400_000) {
+        const txt = new TextDecoder().decode(Uint8Array.from(atob(a.base64), (c) => c.charCodeAt(0)));
+        blocks.push({ type: 'document', title: name, source: { type: 'text', media_type: 'text/plain', data: txt } });
+      }
+    }
+    if (listed.length) {
+      blocks.unshift({ type: 'text', text: `<attached_files>\nThe user attached these files. To put one into a page's file input, use file_upload with its path.\n${listed.join('\n')}\n</attached_files>` });
+    }
+    return blocks;
+  }
+
   // ---------- tools & system prompt ----------
   // Anthropic's browser toolset when the model supports it (models are trained
   // on it), our own browsing tools otherwise. A conversation that already used
   // the toolset has to stay on a model that supports it.
   #usedToolset() {
     return this.messages.some((m) => m.role === 'assistant' && Array.isArray(m.content) && m.content.some(isToolsetUse));
+  }
+
+  #container() {
+    const c = this.containerRef;
+    return c && (!c.expiresAt || c.expiresAt > Date.now() + 30_000) ? c.id : undefined;
+  }
+
+  #usedServerTools() {
+    return this.messages.some((m) => m.role === 'assistant' && Array.isArray(m.content) && m.content.some((b) => b.type === 'server_tool_use'));
   }
 
   #useToolset(model) {
@@ -204,10 +252,11 @@ export class AgentSession {
   // the prompt cache stays warm and thinking blocks stay valid; later changes
   // (another permission mode, a site with extra know-how) are appended to the
   // conversation as notes instead.
-  async #ensureSystem({ mode, tabs, toolset }) {
-    if (this.system && this.systemToolset === toolset) return;
-    this.system = await buildSystem({ mode, tabs, toolset });
-    this.systemToolset = toolset;
+  async #ensureSystem({ mode, tabs, toolset, web = false, memory = false }) {
+    const key = `${toolset}|${web}|${memory}`;
+    if (this.system && this.systemKey === key) return;
+    this.system = await buildSystem({ mode, tabs, toolset, web, memory });
+    this.systemKey = key;
     this.notedMode = mode;
     this.notedSkills = new Set(domainSkills(tabs.map((t) => t.url)).map((s) => s.name));
   }
@@ -255,18 +304,25 @@ export class AgentSession {
       requestApproval: (req) => this.requestApproval(req),
       approvePlan: (plan) => this.approvePlan(plan),
       runShortcut: this.runShortcut,
+      attachments: this.files,
+      memoryEnabled: settings.memory !== false,
     };
   }
 
-  async #loop({ model, mode, settings, toolset }) {
+  async #loop({ model, mode, settings, toolset, policy = {} }) {
     // Remote MCP tools are resolved once per run so the tool list (and the
     // prompt cache prefix) stays stable across turns.
     const remote = await remoteTools().catch(() => []);
     const remoteByName = new Map(remote.map((t) => [t.name, t]));
     const remoteDefs = remote.map(({ _server, _tool, ...t }) => t); // eslint-disable-line no-unused-vars
-    const toolList = (ts) => (ts
-      ? [BROWSER_TOOLSET, ...PANEL_TOOLS.filter((t) => !REPLACED_TOOLS.has(t.name)), ...remoteDefs]
-      : [...PANEL_TOOLS, ...remoteDefs]);
+    const useWeb = () => !!modelInfo(model).browser && settings.webResearch !== false && !this.noWebTools;
+    const extras = () => [...(settings.memory !== false ? MEMORY_TOOLS : []), ...remoteDefs];
+    const toolList = (ts) => [
+      ...(ts ? [BROWSER_TOOLSET] : []),
+      ...(useWeb() ? webTools(settings, policy) : []),
+      ...(ts ? PANEL_TOOLS.filter((t) => !REPLACED_TOOLS.has(t.name)) : PANEL_TOOLS),
+      ...extras(),
+    ];
     let tools = toolList(toolset);
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       if (this.abort.signal.aborted) throw new DOMException('aborted', 'AbortError');
@@ -275,16 +331,24 @@ export class AgentSession {
       let msg;
       try {
         msg = await streamMessage(
-          { model, system: this.system, messages: this.messages, tools, effort: settings.effort },
+          { model, system: this.system, messages: this.messages, tools, effort: settings.effort, container: this.#container() },
           { signal: this.abort.signal, onEvent: (ev) => this.#forward(ev) },
         );
       } catch (e) {
+        // The endpoint does not offer the web tools: continue without them.
+        if (e.status === 400 && /web_search|web_fetch/.test(e.message) && useWeb() && !this.#usedServerTools()) {
+          this.noWebTools = true;
+          tools = toolList(toolset);
+          await this.#ensureSystem({ mode, tabs: await tabGroups.tabs(this.id), toolset, web: false, memory: settings.memory !== false });
+          turn--;
+          continue;
+        }
         // The endpoint does not offer the browser toolset: continue with our own tools.
         if (toolset && e.status === 400 && /browser_toolset/.test(e.message) && !this.#usedToolset()) {
           this.classicTools = true;
           toolset = false;
           tools = toolList(false);
-          await this.#ensureSystem({ mode, tabs: await tabGroups.tabs(this.id), toolset: false });
+          await this.#ensureSystem({ mode, tabs: await tabGroups.tabs(this.id), toolset: false, web: useWeb(), memory: settings.memory !== false });
           turn--;
           continue;
         }
@@ -293,6 +357,7 @@ export class AgentSession {
       this.usage.input_tokens += msg.usage.input_tokens || 0;
       this.usage.output_tokens += msg.usage.output_tokens || 0;
       this.emit({ type: 'usage', usage: this.usage });
+      if (msg.container?.id) this.containerRef = { id: msg.container.id, expiresAt: Date.parse(msg.container.expires_at) || 0 };
 
       const clean = msg.content.map(({ _invalidJson, ...b }) => b); // eslint-disable-line no-unused-vars
       this.messages.push({ role: 'assistant', content: clean });
@@ -362,9 +427,20 @@ export class AgentSession {
   }
 
   #forward(ev) {
+    const b = ev.block;
     if (ev.type === 'text') this.emit({ type: 'text_delta', text: ev.text });
     else if (ev.type === 'thinking') this.emit({ type: 'thinking_delta', text: ev.text });
-    else if (ev.type === 'block_start' && ev.block.type === 'text') this.emit({ type: 'text_block_start' });
+    else if (ev.type === 'block_start' && b.type === 'text') this.emit({ type: 'text_block_start' });
+    // Server tools (web search / fetch, and the code that filters their results)
+    // run on Anthropic's side; show them as tool cards.
+    else if (ev.type === 'block_stop' && b.type === 'server_tool_use') this.emit({ type: 'tool_start', id: b.id, name: b.name, input: b.input });
+    else if (ev.type === 'block_start' && SERVER_RESULT_TYPES.has(b.type)) {
+      const s = summarizeServerResult(b);
+      this.emit({ type: 'tool_result', id: b.tool_use_id, name: b.type, isError: s.isError, content: [{ type: 'text', text: s.text }] });
+    } else if (ev.type === 'block_stop' && b.type === 'text' && b.citations?.length) {
+      const sources = citedSources(b);
+      if (sources.length) this.emit({ type: 'citations', sources });
+    }
   }
 
   // ---------- Quick Mode ----------
@@ -458,6 +534,7 @@ function errorResult(u, reason) {
 
 function stripForHistory(b) {
   if (b.type === 'image') return { type: 'text', text: '[screenshot]' };
+  if (b.type === 'document') return { type: 'text', text: `[attached file: ${b.title || 'document'}]` };
   if (b.type === 'tool_result' && Array.isArray(b.content)) return { ...b, content: b.content.map(stripForHistory) };
   return b;
 }

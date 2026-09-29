@@ -21,6 +21,10 @@ const L = {
     behaviour: 'Agent behaviour', behaviourHint: 'Defaults for new tasks. You can also change the model and approval mode from the side panel.',
     model: 'Default model', effort: 'Effort', mode: 'Approval mode', safety: 'Independent safety checker for each action (Automatically approve mode)', language: 'Interface language',
     notif: 'Desktop notification when a background task finishes', sound: 'Play a sound when a task finishes',
+    web: 'Web research: the agent can search the web and read pages without opening tabs (each search is charged to your credits)',
+    memoryOn: 'Long-term memory: remember the preferences you share, for future conversations',
+    memory: 'Memory', memoryHint: 'Things you asked the agent to remember. They stay in this browser and are shown to the agent at the start of each new conversation.',
+    noMemory: 'Nothing saved yet. Tell the agent "remember that…" to add something.', clearMemory: 'Forget everything', clearMemoryQ: 'Delete all memories?',
     sites: 'Your approved sites', sitesHint: 'Sites where you chose "Always allow". Entries are integrity-protected; tampered entries are ignored.',
     site: 'Site', since: 'Approved', status: 'Status', revoke: 'Revoke', revokeAll: 'Revoke all', none: 'No approved sites yet.', valid: 'valid', tampered: 'tampered (ignored)',
     blocklist: 'Personal blocklist', blocklistHint: 'One domain per line. Infera will never open or act on these sites (subdomains included). Banking, trading, crypto, adult and piracy sites are blocked by default.',
@@ -38,6 +42,10 @@ const L = {
     behaviour: 'سلوك الوكيل', behaviourHint: 'الإعدادات الافتراضية للمهام الجديدة، ويمكن تغيير النموذج ووضع الموافقة من اللوحة الجانبية أيضًا.',
     model: 'النموذج الافتراضي', effort: 'مستوى الجهد', mode: 'وضع الموافقة', safety: 'فاحص أمان مستقل لكل إجراء (في وضع الموافقة التلقائية)', language: 'لغة الواجهة',
     notif: 'إشعار سطح المكتب عند انتهاء مهمة في الخلفية', sound: 'تشغيل صوت عند انتهاء المهمة',
+    web: 'البحث في الإنترنت: يبحث الوكيل ويقرأ الصفحات دون فتح تبويبات (كل عملية بحث تُخصم من رصيدك)',
+    memoryOn: 'الذاكرة الدائمة: تذكّر التفضيلات التي تشاركها في المحادثات القادمة',
+    memory: 'الذاكرة', memoryHint: 'ما طلبت من الوكيل أن يتذكره. تبقى في هذا المتصفح وتُعرض على الوكيل في بداية كل محادثة جديدة.',
+    noMemory: 'لا يوجد شيء محفوظ بعد. قل للوكيل «تذكّر أن…» لإضافة شيء.', clearMemory: 'نسيان كل شيء', clearMemoryQ: 'حذف كل الذكريات؟',
     sites: 'المواقع التي وافقت عليها', sitesHint: 'المواقع التي اخترت فيها «السماح دائمًا». الإدخالات محمية بتوقيع سلامة، وأي إدخال معدَّل يُتجاهل.',
     site: 'الموقع', since: 'تاريخ الموافقة', status: 'الحالة', revoke: 'إلغاء', revokeAll: 'إلغاء الكل', none: 'لا توجد مواقع موافق عليها بعد.', valid: 'سليم', tampered: 'معدَّل (متجاهَل)',
     blocklist: 'قائمة الحظر الشخصية', blocklistHint: 'نطاق في كل سطر. لن يفتح إنفرا هذه المواقع أو يعمل عليها (بما فيها النطاقات الفرعية). مواقع البنوك والتداول والعملات المشفرة والمحتوى الإباحي والمقرصن محظورة افتراضيًا.',
@@ -111,16 +119,29 @@ async function render() {
   const safety = el('input', { type: 'checkbox', checked: s.safetyChecker ? true : undefined });
   const notif = el('input', { type: 'checkbox', checked: s.notifications ? true : undefined });
   const sound = el('input', { type: 'checkbox', checked: s.sound ? true : undefined });
+  const web = el('input', { type: 'checkbox', checked: s.webResearch !== false ? true : undefined });
+  const mem = el('input', { type: 'checkbox', checked: s.memory !== false ? true : undefined });
   const savedB = el('span', { class: 'saved' });
   app.append(el('section', { class: 'card' },
     el('h2', {}, tr('behaviour')), el('p', { class: 'muted' }, tr('behaviourHint')),
     el('div', { class: 'fields' }, field(tr('model'), model), field(tr('effort'), effort), field(tr('mode'), mode), field(tr('language'), lang)),
-    el('div', { style: 'display:grid;gap:8px;margin-top:12px' }, check(tr('safety'), safety), check(tr('notif'), notif), check(tr('sound'), sound)),
+    el('div', { style: 'display:grid;gap:8px;margin-top:12px' }, check(tr('safety'), safety), check(tr('notif'), notif), check(tr('sound'), sound), check(tr('web'), web), check(tr('memoryOn'), mem)),
     el('div', { class: 'actions' }, el('button', { class: 'btn primary', onclick: async () => {
-      await send('update_settings', { patch: { model: model.value, effort: effort.value, permissionMode: mode.value, language: lang.value, safetyChecker: safety.checked, notifications: notif.checked, sound: sound.checked } });
+      await send('update_settings', { patch: { model: model.value, effort: effort.value, permissionMode: mode.value, language: lang.value, safetyChecker: safety.checked, notifications: notif.checked, sound: sound.checked, webResearch: web.checked, memory: mem.checked } });
       savedB.textContent = tr('saved');
       if (lang.value !== s.language) render();
     } }, tr('save')), savedB)));
+
+  // Long-term memory
+  const memories = await send('list_memory');
+  app.append(el('section', { class: 'card' },
+    el('h2', {}, tr('memory')), el('p', { class: 'muted' }, tr('memoryHint')),
+    memories.length
+      ? el('table', {}, el('tbody', {}, ...memories.map((m) => el('tr', {},
+        el('td', {}, m.text), el('td', { class: 'muted', style: 'white-space:nowrap' }, new Date(m.createdAt).toLocaleDateString()),
+        el('td', {}, el('button', { class: 'btn', onclick: async () => { await send('forget_memory', { id: m.id }); render(); } }, tr('remove')))))))
+      : el('p', { class: 'muted' }, tr('noMemory')),
+    memories.length ? el('div', { class: 'actions' }, el('button', { class: 'btn', onclick: async () => { if (confirm(tr('clearMemoryQ'))) { await send('clear_memory'); render(); } } }, tr('clearMemory'))) : null));
 
   // Approved sites
   const perms = await send('list_permissions');

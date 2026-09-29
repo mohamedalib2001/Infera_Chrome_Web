@@ -16,6 +16,7 @@ import { startRecording, stopRecording, addStep, recordingState } from './record
 import { signOut, authStatus, inferaSignIn, refreshInferaAccount, inferaServer } from './auth.js';
 import { overlay } from './page.js';
 import { executeTool } from './tools/executor.js';
+import { listMemory, forgetMemory, clearMemory } from './memory.js';
 import { listServers, saveServer, deleteServer } from './remote-mcp.js';
 
 // ---------------- session registry ----------------
@@ -230,6 +231,9 @@ async function handleMessage(msg, sender) {
     case 'infera_sign_in': return inferaSignIn();
     case 'refresh_account': return refreshInferaAccount();
     case 'classify': return classifyUrl(msg.url);
+    case 'list_memory': return listMemory();
+    case 'forget_memory': await forgetMemory(msg.id); return listMemory();
+    case 'clear_memory': await clearMemory(); return [];
     case 'list_mcp_servers': return listServers();
     case 'save_mcp_server': await saveServer(msg.server); return listServers();
     case 'delete_mcp_server': await deleteServer(msg.id); return listServers();

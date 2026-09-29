@@ -90,6 +90,47 @@ const server = http.createServer((req, res) => {
           { type: 'content_block_stop', index: 0 },
           { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }]);
       }
+      if (phase === 'web' || phase === 'plain') {
+        const tu = (index, id, name, input, toolset = false) => [
+          { type: 'content_block_start', index, content_block: { type: 'tool_use', id, name, ...(toolset ? { toolset_name: 'browser' } : {}), input: {} } },
+          { type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: JSON.stringify(input) } },
+          { type: 'content_block_stop', index },
+        ];
+        const end = (id, text) => sse(res, [start(id),
+          { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+          { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } },
+          { type: 'content_block_stop', index: 0 },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }]);
+        if (phase === 'plain') return end('p1', 'Hello again.');
+        const k = j.messages.filter((m) => m.role === 'assistant').length;
+        if (k === 0) {
+          // A web search on Anthropic's side, a cited answer, then two memory saves.
+          return sse(res, [start('w1'),
+            { type: 'content_block_start', index: 0, content_block: { type: 'server_tool_use', id: 'srv_1', name: 'web_search', input: {} } },
+            { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"query":"aisle seats"}' } },
+            { type: 'content_block_stop', index: 0 },
+            { type: 'content_block_start', index: 1, content_block: { type: 'web_search_tool_result', tool_use_id: 'srv_1', content: [{ type: 'web_search_result', url: 'https://example.com/seats', title: 'Seat guide', encrypted_content: 'ENC123', page_age: 'today' }] } },
+            { type: 'content_block_stop', index: 1 },
+            { type: 'content_block_start', index: 2, content_block: { type: 'text', text: '', citations: [] } },
+            { type: 'content_block_delta', index: 2, delta: { type: 'text_delta', text: 'Aisle seats are easier to leave.' } },
+            { type: 'content_block_delta', index: 2, delta: { type: 'citations_delta', citation: { type: 'web_search_result_location', url: 'https://example.com/seats', title: 'Seat guide', encrypted_index: 'EI1', cited_text: 'aisle' } } },
+            { type: 'content_block_stop', index: 2 },
+            ...tu(3, 'mem_1', 'memory_save', { text: 'Prefers aisle seats' }),
+            ...tu(4, 'mem_2', 'memory_save', { text: 'My password is hunter2' }),
+            { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 30, server_tool_use: { web_search_requests: 1 } } }, { type: 'message_stop' }]);
+        }
+        if (k === 1) {
+          return sse(res, [start('w2'), ...tu(0, 'rp_1', 'read_page', { filter: 'interactive' }, true),
+            { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }]);
+        }
+        if (k === 2) {
+          const tree = JSON.stringify(j.messages.at(-1).content);
+          const ref = (tree.match(/Attachment\\" \[(ref_\d+)\]/) || [])[1] || 'ref_missing';
+          return sse(res, [start('w3'), ...tu(0, 'fu_1', 'file_upload', { target: { type: 'ref', ref }, paths: ['/attachments/notes.txt'] }, true),
+            { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }]);
+        }
+        return end('w4', 'Uploaded your notes.');
+      }
       if (phase === 'remote') {
         if (j.messages.length === 1) {
           return sse(res, [start('r1'),
@@ -175,7 +216,11 @@ const req2 = requests[1]?.body;
 check('two API requests', requests.length === 2, String(requests.length));
 check('headers: version + INFERA session token, no API key', requests[0].headers['anthropic-version'] === '2023-06-01' && requests[0].headers.authorization === 'Bearer inf_test' && !requests[0].headers['x-api-key'] && !requests[0].headers['anthropic-dangerous-direct-browser-access']);
 check('adaptive thinking + effort', requests[0].body.thinking?.type === 'adaptive' && requests[0].body.output_config?.effort === 'high');
-check('tools sent w/ eager streaming + cache_control', requests[0].body.tools.length === 23 && requests[0].body.tools[0].eager_input_streaming === true && !!requests[0].body.tools.at(-1).cache_control);
+const t0 = requests[0].body.tools;
+check('tools: web search/fetch first, own tools w/ eager streaming, memory, cache_control',
+  t0.length === 27 && t0[0].type === 'web_search_20260318' && t0[0].response_inclusion === 'excluded' && t0[1].type === 'web_fetch_20260318'
+  && !t0[0].eager_input_streaming && t0[2].eager_input_streaming === true && t0.some((t) => t.name === 'memory_save') && !!t0.at(-1).cache_control,
+  t0.map((t) => t.name || t.type).join(','));
 check('tab context in first user msg', JSON.stringify(requests[0].body.messages[0]).includes('<tab_context>'));
 const asst = req2.messages[1];
 check('thinking block echoed with signature', asst.content[0].type === 'thinking' && asst.content[0].signature === 'SIG123');
@@ -229,6 +274,41 @@ await sw.evaluate(async () => { // close the tab the toolset opened
   const tabs = await chrome.tabs.query({ url: 'about:blank' });
   for (const t of tabs) await chrome.tabs.remove(t.id).catch(() => {});
 });
+phase = 'normal';
+
+// Web research, citations, memory and file attachments (Claude Opus 5.5).
+requests.length = 0;
+phase = 'web';
+const web = await sw.evaluate(async ({ tabId }) => {
+  const I = self.__infera;
+  await I.updateSettings({ userBlocklist: ['blocked.example'] });
+  const s = new I.AgentSession({ kind: 'panel' });
+  const cites = [];
+  s.subscribe((e) => { if (e.type === 'citations') cites.push(...e.sources); });
+  await s.run('Which seat should I pick? Remember I like aisle seats. Then upload my notes.', {
+    startTabId: tabId,
+    attachments: [{ kind: 'file', name: 'notes.txt', mediaType: 'text/plain', base64: btoa('hello file') }],
+  });
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const uploaded = (await chrome.scripting.executeScript({ target: { tabId }, func: () => document.getElementById('file').files[0]?.name || null }))[0].result;
+  const mem = (await chrome.storage.local.get('userMemory')).userMemory || [];
+  return { status: s.status, cites, uploaded, mem: mem.map((m) => m.text), tab: tab?.id };
+}, { tabId });
+const [w1, w2, , w4] = requests.map((r) => r.body);
+check('web: task done', web.status === 'done', web.status);
+check('web: search + fetch offered with the blocklist', w1.tools.some((t) => t.type === 'web_search_20260318' && t.blocked_domains?.includes('blocked.example')) && w1.tools.some((t) => t.type === 'web_fetch_20260318'));
+check('web: citations shown as sources', web.cites.some((c) => c.url === 'https://example.com/seats'), JSON.stringify(web.cites));
+const replay = w2.messages[1].content;
+check('web: server blocks replayed unchanged', replay.some((b) => b.type === 'server_tool_use' && b.input.query === 'aisle seats') && replay.some((b) => b.type === 'web_search_tool_result' && b.content[0].encrypted_content === 'ENC123') && replay.some((b) => b.citations?.[0]?.encrypted_index === 'EI1'));
+check('files: attached file listed and given to the model', JSON.stringify(w1.messages[0]).includes('/attachments/notes.txt') && w1.messages[0].content.some((b) => b.type === 'document' && b.source.data === 'hello file'));
+const memResults = w2.messages.at(-1).content.filter((b) => b.type === 'tool_result');
+check('memory: saved, secrets refused', web.mem.includes('Prefers aisle seats') && !web.mem.some((m) => /hunter2/.test(m)) && memResults[1]?.is_error === true, JSON.stringify(web.mem));
+check('files: file_upload put the attachment into the page', web.uploaded === 'notes.txt', JSON.stringify({ uploaded: web.uploaded, last: w4?.messages.at(-1) }).slice(0, 400));
+requests.length = 0;
+phase = 'plain';
+await run('claude-opus-5-5', { classic: false });
+check('memory: shown at the start of a new conversation', JSON.stringify(requests[0].body.messages[0]).includes('<user_memory>') && JSON.stringify(requests[0].body.messages[0]).includes('Prefers aisle seats'));
+await sw.evaluate(() => self.__infera.updateSettings({ userBlocklist: [] }));
 phase = 'normal';
 
 // Without an INFERA Agent session nothing is sent, even with an API key in storage.

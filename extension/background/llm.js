@@ -30,12 +30,14 @@ async function authHeaders(settings) {
   return { headers: h, betas: [], baseUrl: auth.baseUrl, mode: 'infera' };
 }
 
-function buildBody({ model, system, messages, tools, maxTokens, effort, quick, stream = true }) {
+function buildBody({ model, system, messages, tools, maxTokens, effort, quick, container, stream = true }) {
   const info = modelInfo(model);
   const id = baseModelId(model);
   const betas = [];
   const body = { model: id, max_tokens: maxTokens ?? (stream ? 64000 : 16000), messages, stream };
   if (system) body.system = system;
+  // The code-execution container behind web search/fetch filtering, reused across turns.
+  if (container) body.container = container;
 
   if (quick) {
     // Quick Mode: compact command language, no tool definitions.
@@ -145,6 +147,7 @@ export async function streamMessage(params, { signal, onEvent = () => {} } = {})
         Object.assign(msg.usage, data.message.usage || {});
         msg.id = data.message.id;
         msg.model = data.message.model;
+        if (data.message.container) msg.container = data.message.container;
         break;
       case 'content_block_start': {
         const b = structuredClone(data.content_block);
@@ -176,6 +179,7 @@ export async function streamMessage(params, { signal, onEvent = () => {} } = {})
       case 'message_delta':
         if (data.delta?.stop_reason) msg.stop_reason = data.delta.stop_reason;
         if (data.delta?.stop_details) msg.stop_details = data.delta.stop_details;
+        if (data.delta?.container) msg.container = data.delta.container;
         Object.assign(msg.usage, data.usage || {});
         break;
       case 'error':

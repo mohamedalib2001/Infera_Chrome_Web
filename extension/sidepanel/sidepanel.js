@@ -61,6 +61,7 @@ function onEvent(ev) {
     case 'thinking_delta': appendThinking(ev.text); break;
     case 'tool_start': curText = null; addToolCard(ev.id, ev.name, ev.input); break;
     case 'tool_result': finishToolCard(ev.id, ev.content, ev.isError); break;
+    case 'citations': addSources(ev.sources); break;
     case 'permission_request': addApproval(ev.request); break;
     case 'plan_request': addPlan(ev.request); break;
     case 'error': addBanner(ev.message); break;
@@ -159,14 +160,18 @@ function renderHistory(messages) {
   for (const msg of messages) {
     const blocks = Array.isArray(msg.content) ? msg.content : [{ type: 'text', text: String(msg.content) }];
     if (msg.role === 'user') {
-      const texts = blocks.filter((b) => b.type === 'text' && !b.text.startsWith('<tab_context>') && !b.text.startsWith('<system-reminder>'));
+      const texts = blocks.filter((b) => b.type === 'text' && !/^<(tab_context|system-reminder|user_memory|attached_files)>/.test(b.text));
       const imgs = blocks.filter((b) => b.type === 'image');
       if (!texts.length && !imgs.length) continue;
       if (blocks.some((b) => b.type === 'tool_result')) continue;
       addUser(texts.map((b) => b.text).join('\n'), imgs.map((b) => `data:${b.source.media_type};base64,${b.source.data}`));
     } else {
       for (const b of blocks) {
-        if (b.type === 'text' && b.text) { const d = el('div', { class: 'msg assistant', html: renderMarkdown(b.text) }); m.append(d); }
+        if (b.type === 'text' && b.text) {
+          m.append(el('div', { class: 'msg assistant', html: renderMarkdown(b.text) }));
+          if (b.citations?.length) addSources(b.citations.map((c) => ({ url: c.url, title: c.title })).filter((c) => c.url));
+        } else if (b.type === 'server_tool_use') addToolCard(b.id, b.name, b.input);
+        else if (/_tool_result$/.test(b.type) && b.tool_use_id) finishToolCard(b.tool_use_id, [], /error/.test(b.content?.type || ''));
         else if (b.type === 'thinking' && b.thinking) m.append(thinkingEl(b.thinking));
         else if (b.type === 'tool_use') {
           addToolCard(b.id, b.name, b.input);
@@ -180,8 +185,9 @@ function renderHistory(messages) {
   scroll();
 }
 
-function addUser(text, imgs = []) {
-  $('#messages').append(el('div', { class: 'msg user' }, text, ...imgs.map((src) => el('img', { src, alt: '' }))));
+function addUser(text, imgs = [], files = []) {
+  $('#messages').append(el('div', { class: 'msg user' }, text, ...imgs.map((src) => el('img', { src, alt: '' })),
+    ...files.map((name) => el('div', { class: 'file-chip' }, `📎 ${name}`))));
   updateEmpty();
   scroll();
 }
@@ -196,6 +202,21 @@ function appendText(delta) {
   const target = curText;
   clearTimeout(renderTimer);
   renderTimer = setTimeout(() => { target.el.innerHTML = renderMarkdown(target.buf); scroll(); }, 40);
+}
+
+// Sources the answer cites (web search results), shown under the message.
+function addSources(sources = []) {
+  const seen = new Set();
+  const list = sources.filter((s) => s.url && !seen.has(s.url) && seen.add(s.url));
+  if (!list.length) return;
+  const box = el('div', { class: 'sources' }, el('span', { class: 'muted' }, t('sources')),
+    ...list.slice(0, 8).map((s) => {
+      let host = s.url;
+      try { host = new URL(s.url).hostname.replace(/^www\./, ''); } catch { /* keep */ }
+      return el('a', { href: s.url, target: '_blank', rel: 'noopener noreferrer', title: s.title || s.url }, host);
+    }));
+  $('#messages').append(box);
+  scroll();
 }
 
 function thinkingEl(text) {
@@ -218,7 +239,20 @@ const TOOL_ICON = {
   read_console_messages: '>_', read_network_requests: '⇅', upload_image: '⤒', file_upload: '⤒', resize_window: '⤢',
   gif_creator: 'GIF', browser_batch: '⋯', tabs_context_mcp: '▭', tabs_create_mcp: '+', tabs_close_mcp: '×', tabs_context: '▭',
   tabs_create: '+', update_plan: '✓', shortcuts_list: '/', shortcuts_execute: '/', turn_answer_start: '·',
+  // Anthropic browser toolset members
+  screenshot: '⌖', zoom: '⌕', left_click: '⌖', right_click: '⌖', middle_click: '⌖', double_click: '⌖', triple_click: '⌖',
+  hover: '⌖', mouse_move: '⌖', left_click_drag: '⇢', left_mouse_down: '⌖', left_mouse_up: '⌖', scroll: '↕', scroll_to: '↕',
+  type: '✎', key: '⌨', hold_key: '⌨', wait: '…', read_console: '>_', read_network: '⇅', javascript_exec: 'JS',
+  new_tab: '+', list_tabs: '▭', switch_tab: '▭', close_tab: '×',
+  // Server tools and memory
+  web_search: '🔎', web_fetch: '↓', code_execution: '⚙', bash_code_execution: '⚙', text_editor_code_execution: '⚙',
+  memory_save: '★', memory_forget: '☆',
 };
+
+function targetText(tg) {
+  if (!tg) return '';
+  return tg.type === 'ref' ? tg.ref : tg.type === 'coordinate' ? `(${tg.x}, ${tg.y})` : '';
+}
 
 function toolSummary(name, i = {}) {
   switch (name) {
@@ -237,6 +271,20 @@ function toolSummary(name, i = {}) {
     case 'browser_batch': return `${i.actions?.length || 0} actions`;
     case 'gif_creator': return i.action;
     case 'update_plan': return (i.domains || []).join(', ');
+    case 'left_click': case 'right_click': case 'middle_click': case 'double_click': case 'triple_click':
+    case 'hover': case 'mouse_move': case 'scroll_to': case 'left_mouse_down': case 'left_mouse_up':
+      return targetText(i.target);
+    case 'scroll': return `${i.scroll_direction || 'down'} ${targetText(i.target)}`;
+    case 'type': return `“${String(i.text || '').slice(0, 50)}”`;
+    case 'key': case 'hold_key': return String(i.text || '');
+    case 'wait': return `${i.duration ?? 1}s`;
+    case 'read_page': return i.filter || '';
+    case 'switch_tab': case 'close_tab': return String(i.tab_id || '');
+    case 'javascript_exec': return String(i.text || '').slice(0, 60);
+    case 'web_search': return `“${i.query || ''}”`;
+    case 'web_fetch': return String(i.url || '');
+    case 'memory_save': return `“${String(i.text || '').slice(0, 60)}”`;
+    case 'memory_forget': return String(i.id || '');
     default: return '';
   }
 }
@@ -351,7 +399,8 @@ async function send(textOverride) {
   input.value = '';
   autosize();
   hideSlash();
-  addUser(text, atts.map((a) => `data:${a.mediaType};base64,${a.base64}`));
+  addUser(text, atts.filter((a) => a.kind !== 'file' || a.mediaType.startsWith('image/')).map((a) => `data:${a.mediaType};base64,${a.base64}`),
+    atts.filter((a) => a.kind === 'file').map((a) => a.name));
   try { await call('send', { text, attachments: atts }); } catch (e) { addBanner(e.message); }
 }
 
@@ -411,10 +460,26 @@ function fileToB64(file) {
 }
 
 function renderAttachments() {
-  $('#attachments').replaceChildren(...attachments.map((a, i) => el('div', { class: 'att' },
-    el('img', { src: `data:${a.mediaType};base64,${a.base64}`, alt: '' }),
+  $('#attachments').replaceChildren(...attachments.map((a, i) => el('div', { class: `att${a.kind === 'file' && !a.mediaType.startsWith('image/') ? ' file' : ''}`, title: a.name || '' },
+    a.kind === 'file' && !a.mediaType.startsWith('image/')
+      ? el('span', { class: 'fname' }, `📎 ${a.name}`)
+      : el('img', { src: `data:${a.mediaType};base64,${a.base64}`, alt: '' }),
     el('button', { onclick: () => { attachments.splice(i, 1); renderAttachments(); }, 'aria-label': 'remove' }, '×'))));
 }
+
+// Files from the device: the agent can read PDFs/text/images and upload them to pages.
+const FILE_LIMIT = 10 * 1024 * 1024;
+$('#btnFile').addEventListener('click', () => $('#fileInput').click());
+$('#fileInput').addEventListener('change', async (e) => {
+  let total = attachments.reduce((n, a) => n + (a.size || 0), 0);
+  for (const f of e.target.files) {
+    if (total + f.size > FILE_LIMIT) { addBanner(t('fileTooBig')); break; }
+    total += f.size;
+    attachments.push({ kind: 'file', name: f.name, mediaType: f.type || 'application/octet-stream', size: f.size, base64: await fileToB64(f) });
+  }
+  e.target.value = '';
+  renderAttachments();
+});
 
 $('#btnAttach').addEventListener('click', async () => {
   let dataUrl;

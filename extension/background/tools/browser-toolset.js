@@ -11,13 +11,15 @@ import { tabGroups } from '../tab-groups.js';
 
 export const TOOLSET_NAME = 'browser';
 
-// file_upload stays off: it takes local file paths, which an extension cannot read.
+// file_upload takes paths; here they name the files the user attached in the
+// side panel (/attachments/<name>) — the extension cannot read arbitrary local paths.
 export const BROWSER_TOOLSET = {
   type: 'browser_toolset_20260801',
   configs: {
     javascript_exec: { enabled: true },
     read_console: { enabled: true },
     read_network: { enabled: true },
+    file_upload: { enabled: true },
   },
 };
 
@@ -109,6 +111,7 @@ function mapMember(name, i, tabId) {
     case 'find': return ['find', { query: i.query, tabId }];
     case 'get_page_text': return ['get_page_text', { tabId }];
     case 'form_input': return ['form_input', { ...target(i.target), value: i.value, tabId }];
+    case 'file_upload': return ['file_upload', { ...target(i.target), paths: i.paths || [], tabId }];
     case 'read_console': return ['read_console_messages', { tabId }];
     case 'read_network': return ['read_network_requests', { tabId }];
     case 'javascript_exec': return ['javascript_tool', { action: 'javascript_exec', text: i.text, tabId }];

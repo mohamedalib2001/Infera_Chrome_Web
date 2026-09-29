@@ -27,6 +27,7 @@ const STR = {
     credits: 'Credits', blockCredits: "You're out of credits. Top up on inferaagent.com to continue.", blockCap: 'Your monthly spending cap on INFERA Agent is reached.', blockConsent: 'Open inferaagent.com and accept the updated terms first.',
     email: 'Email', password: 'Password', server: 'INFERA Agent address (https://inferaagent.com)', signIn: 'Sign in with INFERA Agent', signOut: 'Sign out',
     createAccount: "Don't have an account? Create one on inferaagent.com", signedInAs: 'Signed in as',
+    attachFile: 'Attach files from your device (the agent can read them and upload them to sites)', sources: 'Sources:', fileTooBig: 'Attachments are limited to 10 MB in total.',
     noProvider: 'Your organization has not set up a model provider in Infera Agent yet. Ask an administrator to add it.',
   },
   ar: {
@@ -56,6 +57,7 @@ const STR = {
     credits: 'الرصيد', blockCredits: 'رصيدك نفد. اشحن رصيدك على inferaagent.com للمتابعة.', blockCap: 'وصلت إلى حد الإنفاق الشهري في إنفرا إيجنت.', blockConsent: 'افتح inferaagent.com ووافق على الشروط المحدّثة أولًا.',
     email: 'البريد الإلكتروني', password: 'كلمة المرور', server: 'عنوان إنفرا إيجنت (https://inferaagent.com)', signIn: 'تسجيل الدخول بحساب إنفرا إيجنت', signOut: 'تسجيل الخروج',
     createAccount: 'ليس لديك حساب؟ أنشئ حسابًا على inferaagent.com', signedInAs: 'مسجّل الدخول باسم',
+    attachFile: 'إرفاق ملفات من جهازك (يقرؤها الوكيل ويرفعها إلى المواقع)', sources: 'المصادر:', fileTooBig: 'الحد الأقصى للمرفقات 10 ميجابايت.',
     noProvider: 'لم تُضِف مؤسستك مزوّد النموذج في إنفرا إيجنت بعد. اطلب من المسؤول إضافته.',
   },
 };

@@ -18,6 +18,7 @@ import { callPage, ensureInjected, overlay, waitForLoad } from '../page.js';
 import { gif } from '../gif.js';
 import { completeText, validateInput } from '../llm.js';
 import { listShortcuts, findShortcut } from '../shortcuts.js';
+import { saveMemory, forgetMemory } from '../memory.js';
 import { TOOL_BY_NAME } from './definitions.js';
 import {
   PERMISSION_TYPES as P, HELPER_MODEL, SCREENSHOT_TTL_MS, FIND_MAX_RESULTS, LOG_DEFAULT_LIMIT,
@@ -514,7 +515,16 @@ const impl = {
 
   async file_upload(ctx, input) {
     const tab = await resolveTab(ctx, input.tabId);
-    const files = input.files || [];
+    let files = input.files || [];
+    // Side panel: paths name files the user attached (/attachments/<name>).
+    if (!files.length && input.paths?.length && ctx.attachments) {
+      files = input.paths.map((p) => {
+        const name = String(p).replace(/^\/?attachments\//, '');
+        const f = ctx.attachments.get(name);
+        if (!f) fail(`${p} is not a file the user attached. Attached files: ${[...ctx.attachments.keys()].map((n) => `/attachments/${n}`).join(', ') || 'none'}. Ask the user to attach the file in the side panel.`);
+        return { name: f.name, mimeType: f.mediaType || 'application/octet-stream', base64: f.base64 };
+      });
+    }
     if (!files.length) fail(input.paths?.length ? 'File contents were not provided. file_upload paths must be read by the MCP client (Infera Code / native host).' : 'No files given.');
     const total = files.reduce((n, f) => n + Math.floor((f.base64?.length || 0) * 0.75), 0);
     if (total >= FILE_UPLOAD_MAX_BYTES) fail(`Total upload size ${(total / 1048576).toFixed(1)} MB exceeds the 10 MB limit.`);
@@ -619,6 +629,18 @@ const impl = {
 
   async turn_answer_start() {
     return ok(text('ok'));
+  },
+
+  async memory_save(ctx, input) {
+    if (!ctx.memoryEnabled) fail('Memory is turned off in Settings.');
+    const m = await saveMemory(input.text);
+    return ok(text(`Saved to memory as ${m.id}: ${m.text}`));
+  },
+
+  async memory_forget(ctx, input) {
+    if (!ctx.memoryEnabled) fail('Memory is turned off in Settings.');
+    await forgetMemory(input.id);
+    return ok(text(`Forgot ${input.id}.`));
   },
 };
 

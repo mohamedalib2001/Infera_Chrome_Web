@@ -15,6 +15,8 @@ export const DEFAULT_SETTINGS = {
   relayEnabled: false,
   remoteDomainClassifier: '', // optional URL template, e.g. https://api.infera.ai/domain_info?domain={domain}
   defaultKeepTabs: false,
+  webResearch: true,   // web search + web fetch (server tools) with models that support them
+  memory: true,        // long-term memory of the user's preferences
 };
 
 export async function getLocal(key, fallback) {

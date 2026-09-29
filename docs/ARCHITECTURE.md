@@ -113,6 +113,26 @@ as a string, `tab_opened` changes). Actions in one turn run in order and stop at
 paths). Plan, shortcuts, GIF, image upload and window size remain our own tools next to the toolset.
 If an endpoint rejects the toolset, the session falls back to the classic tools below.
 
+## Web research, memory and attached files
+
+* **Web research** — `tools/web-tools.js`. With the same models the agent also gets Anthropic's
+  server-side `web_search_20260318` (max 8 per request, billed per search from the person's credits by
+  the gateway) and `web_fetch_20260318` (max 10, 40k tokens each), with dynamic filtering and
+  `response_inclusion: "excluded"`. The person's and the organization's blocklists become
+  `blocked_domains` (an organization allowlist becomes `allowed_domains`). `server_tool_use` /
+  `*_tool_result` blocks are replayed unchanged, the code-execution `container` id is sent back on the
+  next request, searches show as tool cards, and cited sources are listed under the answer.
+  Setting: `webResearch`.
+* **Memory** — `memory.js`, tools `memory_save` / `memory_forget`. Short facts the user asked to be
+  remembered, stored in `chrome.storage.local` (`userMemory`, ≤100 items, ≤500 chars); passwords,
+  codes, card numbers and keys are refused. They are added to the first message of each new
+  conversation as `<user_memory>`; Settings lists them with Remove / Forget everything. Setting:
+  `memory`.
+* **Attached files** — the side panel's paperclip attaches files from the device (10 MB total). Images
+  are shown to the model, PDFs and text files are given to it as documents, and every file is listed
+  in `<attached_files>` as `/attachments/<name>`: the browser toolset's `file_upload` (and the classic
+  `file_upload` via `paths`) puts it into a page's file input.
+
 Preserved thinking (Opus 5.5 / Fable 5.1): the system prompt and tool list are fixed for a
 conversation (later mode changes and site know-how are appended as `<system-reminder>` notes, never
 edited in), the history is append-only, and requests set
