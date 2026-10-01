@@ -134,7 +134,7 @@ export class AgentSession {
     if (policy.enabled === false) throw new Error('Infera Agent is disabled by your organization.');
     this.abort = new AbortController();
     this.task = this.task ? `${this.task}\n\nFollow-up: ${userText}` : userText;
-    if (!this.title) this.title = userText.slice(0, 80);
+    if (!this.title) this.title = (userText || attachments.map((a) => a.name).filter(Boolean).join(', ')).slice(0, 80);
     const model = this.modelOverride || settings.model;
     this.lastModel = model;
     const mode = this.modeOverride || settings.permissionMode;
@@ -167,7 +167,7 @@ export class AgentSession {
           if (mem) content.push(mem);
         }
         content.push(...this.#attachmentBlocks(attachments));
-        content.push({ type: 'text', text: userText });
+        content.push({ type: 'text', text: userText || '(The user sent only the attached files.)' });
         this.messages.push({ role: 'user', content });
         await this.#loop({ model, mode, settings, toolset, policy });
       }

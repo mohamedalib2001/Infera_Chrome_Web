@@ -35,7 +35,18 @@ async function authHeaders(settings) {
 // cache at a tenth of the price instead of being billed in full each time.
 // Markers don't change the conversation, so stored history stays untouched.
 const CACHEABLE = new Set(['text', 'image', 'document', 'tool_result']);
+// The API rejects empty text blocks (e.g. a message that was only an attachment),
+// including ones already saved in an older conversation.
+function withoutEmptyText(messages) {
+  return messages.map((m) => {
+    if (!Array.isArray(m.content) || !m.content.some((b) => b.type === 'text' && !b.text?.trim())) return m;
+    const content = m.content.filter((b) => !(b.type === 'text' && !b.text?.trim()));
+    return { ...m, content: content.length ? content : [{ type: 'text', text: '(empty message)' }] };
+  });
+}
+
 function withCachedTail(messages) {
+  messages = withoutEmptyText(messages);
   const last = messages[messages.length - 1];
   if (!last || last.role !== 'user' || !Array.isArray(last.content)) return messages;
   const i = last.content.findLastIndex((b) => CACHEABLE.has(b.type));
@@ -49,7 +60,7 @@ function buildBody({ model, system, messages, tools, maxTokens, effort, quick, c
   const info = modelInfo(model);
   const id = baseModelId(model);
   const betas = [];
-  const body = { model: id, max_tokens: maxTokens ?? (stream ? 64000 : 16000), messages: stream ? withCachedTail(messages) : messages, stream };
+  const body = { model: id, max_tokens: maxTokens ?? (stream ? 64000 : 16000), messages: stream ? withCachedTail(messages) : withoutEmptyText(messages), stream };
   if (system) body.system = system;
   // The code-execution container behind web search/fetch filtering, reused across turns.
   if (container) body.container = container;

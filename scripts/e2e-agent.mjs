@@ -374,6 +374,18 @@ requests.length = 0;
 phase = 'plain';
 await run('claude-opus-5-5', { classic: false });
 check('memory: shown at the start of a new conversation', JSON.stringify(requests[0].body.messages[0]).includes('<user_memory>') && JSON.stringify(requests[0].body.messages[0]).includes('Prefers aisle seats'));
+// A message that is only an attachment (no text), in a conversation that already
+// holds an empty text block from an older version: no empty text block is sent.
+requests.length = 0;
+const fileOnly = await sw.evaluate(async ({ tabId }) => {
+  const s = new self.__infera.AgentSession({ kind: 'panel' });
+  s.classicTools = false;
+  s.messages.push({ role: 'user', content: [{ type: 'text', text: 'old' }, { type: 'text', text: '' }] }, { role: 'assistant', content: [{ type: 'text', text: 'ok' }] });
+  await s.run('', { startTabId: tabId, attachments: [{ kind: 'file', name: 'pkg.zip', mediaType: 'application/zip', base64: btoa('PK') }] });
+  return { status: s.status, title: s.title };
+}, { tabId });
+const sent = requests[0]?.body.messages || [];
+check('files: attachment-only message sends no empty text block', fileOnly.status === 'done' && sent.length > 0 && sent.every((m) => !Array.isArray(m.content) || m.content.every((b) => b.type !== 'text' || b.text.trim())) && JSON.stringify(sent).includes('/attachments/pkg.zip') && fileOnly.title === 'pkg.zip', JSON.stringify({ fileOnly, sent }).slice(0, 400));
 await sw.evaluate(() => self.__infera.updateSettings({ userBlocklist: [] }));
 phase = 'normal';
 
