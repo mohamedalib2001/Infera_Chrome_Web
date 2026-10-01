@@ -184,6 +184,19 @@ export async function handleInferaUnauthorized() {
   return !!(await refreshInferaToken(a));
 }
 
+// The person's browser-agent cost log from inferaagent.com (all their devices).
+export async function inferaUsage(days = 30, retried = false) {
+  const a = await currentInfera();
+  if (!a) throw new Error('Sign in to see your costs.');
+  try {
+    return await inferaFetch(`${a.server}/api/browser-agent/usage?days=${Number(days) || 30}`, { token: a.accessToken });
+  } catch (e) {
+    if (e.status === 401 && !retried && await refreshInferaToken(a)) return inferaUsage(days, true);
+    if (e.status === 404) throw new Error('The cost log is not available on the server yet.');
+    throw e;
+  }
+}
+
 // Access token for other INFERA Agent services (the cloud relay).
 export async function getAccessToken() {
   return (await currentInfera())?.accessToken ?? null;

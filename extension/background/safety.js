@@ -21,7 +21,7 @@ export async function safetyCheck({ task, action, url, title, target }) {
     `Current page (page-authored): ${JSON.stringify(title || '')} ${url || ''}`,
   ].filter(Boolean).join('\n\n');
   try {
-    const out = await completeText({ model: HELPER_MODEL, system: SYSTEM, prompt, maxTokens: 200, signal: AbortSignal.timeout(15_000) });
+    const out = await completeText({ model: HELPER_MODEL, system: SYSTEM, prompt, maxTokens: 200, signal: AbortSignal.timeout(15_000), task: task?.slice(0, 80) });
     const m = out.match(/\{[\s\S]*\}/);
     const j = m ? JSON.parse(m[0]) : null;
     if (j && ['allow', 'ask', 'block'].includes(j.verdict)) return { verdict: j.verdict, reason: String(j.reason || '').slice(0, 300) };

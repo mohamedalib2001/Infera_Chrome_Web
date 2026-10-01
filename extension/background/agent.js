@@ -9,6 +9,10 @@ import { executeTool } from './tools/executor.js';
 import { PANEL_TOOLS, MEMORY_TOOLS, TOOL_BY_NAME } from './tools/definitions.js';
 import { webTools, SERVER_RESULT_TYPES, summarizeServerResult, citedSources } from './tools/web-tools.js';
 import { listMemory, memoryBlock } from './memory.js';
+import { addSpend, spentToday, lastCurrency, money } from './spend.js';
+
+// Raised to stop a task at the person's budget (not an error).
+class BudgetStop extends Error {}
 import {
   BROWSER_TOOLSET, REPLACED_TOOLS, isToolsetUse, executeMember, toolsetResult, notExecuted,
 } from './tools/browser-toolset.js';
@@ -46,6 +50,8 @@ export class AgentSession {
     this.modelOverride = null;
     this.modeOverride = null;
     this.files = new Map();      // name -> file the user attached (for file_upload)
+    this.cost = 0;               // what this conversation has cost, in the account currency
+    this.currency = '';
   }
 
   // ---------- UI plumbing ----------
@@ -54,7 +60,7 @@ export class AgentSession {
   hasUi() { return this.listeners.size > 0; }
 
   summary() {
-    return { id: this.id, kind: this.kind, title: this.title, status: this.status, createdAt: this.createdAt, usage: this.usage, tokensSaved: this.tokensSaved };
+    return { id: this.id, kind: this.kind, title: this.title, status: this.status, createdAt: this.createdAt, usage: this.usage, tokensSaved: this.tokensSaved, cost: this.cost, currency: this.currency };
   }
 
   setStatus(s) {
@@ -110,6 +116,8 @@ export class AgentSession {
     if (!this.title) this.title = userText.slice(0, 80);
     const model = this.modelOverride || settings.model;
     const mode = this.modeOverride || settings.permissionMode;
+    this.runCost = 0;
+    this.budgetLimit = Number(settings.taskBudget) || 0;
     this.setStatus('running');
     const keepAlive = setInterval(() => chrome.runtime.getPlatformInfo(), 20_000);
 
@@ -147,6 +155,10 @@ export class AgentSession {
         this.#closeDanglingToolUses('The user stopped the task.');
         this.setStatus('stopped');
         this.emit({ type: 'info', message: 'Stopped.' });
+      } else if (e instanceof BudgetStop) {
+        this.#closeDanglingToolUses('Stopped at the spending limit set by the user.');
+        this.setStatus('stopped');
+        this.emit({ type: 'info', message: e.message });
       } else {
         this.#closeDanglingToolUses(`Error: ${e.message}`);
         this.setStatus('error');
@@ -220,6 +232,40 @@ export class AgentSession {
       blocks.unshift({ type: 'text', text: `<attached_files>\nThe user attached these files. To put one into a page's file input, use file_upload with its path.\n${listed.join('\n')}\n</attached_files>` });
     }
     return blocks;
+  }
+
+  // ---------- costs ----------
+  // The gateway reports what each call cost (infera_usage); keep the task's and
+  // the day's totals and show them live.
+  async #account(msg) {
+    const c = msg.charge;
+    if (!c) return;
+    this.cost += c.amount;
+    this.runCost += c.amount;
+    if (c.currency) this.currency = c.currency;
+    if (c.charged) await addSpend(c.amount, this.currency);
+    this.emit({ type: 'cost', task: this.runCost, conversation: this.cost, call: c.amount, currency: this.currency, balance: c.balance });
+  }
+
+  // Before each model call: the daily limit stops the task; the task limit asks
+  // the person whether to continue.
+  async #checkBudget(settings) {
+    if (!this.currency) this.currency = await lastCurrency();
+    const daily = Number(settings.dailyBudget) || 0;
+    if (daily > 0) {
+      const today = await spentToday();
+      if (today >= daily) throw new BudgetStop(`Today's spending limit (${money(daily, this.currency)}) is reached — ${money(today, this.currency)} spent. Raise it in Costs to continue.`);
+    }
+    const step = Number(settings.taskBudget) || 0;
+    if (step > 0 && this.budgetLimit > 0 && this.runCost >= this.budgetLimit) {
+      const answer = await this.requestApproval({
+        type: 'BUDGET',
+        description: `This task has cost ${money(this.runCost, this.currency)} so far (your limit per task is ${money(step, this.currency)}). Continue and allow up to ${money(this.budgetLimit + step, this.currency)}?`,
+        allowAlways: false,
+      });
+      if (answer !== 'once' && answer !== 'always') throw new BudgetStop(`Stopped at your task limit — this task cost ${money(this.runCost, this.currency)}.`);
+      this.budgetLimit += step;
+    }
   }
 
   // ---------- tools & system prompt ----------
@@ -326,12 +372,13 @@ export class AgentSession {
     let tools = toolList(toolset);
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       if (this.abort.signal.aborted) throw new DOMException('aborted', 'AbortError');
+      await this.#checkBudget(settings);
       this.#compact();
       this.emit({ type: 'assistant_start' });
       let msg;
       try {
         msg = await streamMessage(
-          { model, system: this.system, messages: this.messages, tools, effort: settings.effort, container: this.#container() },
+          { model, system: this.system, messages: this.messages, tools, effort: settings.effort, container: this.#container(), task: this.title },
           { signal: this.abort.signal, onEvent: (ev) => this.#forward(ev) },
         );
       } catch (e) {
@@ -357,6 +404,7 @@ export class AgentSession {
       this.usage.input_tokens += msg.usage.input_tokens || 0;
       this.usage.output_tokens += msg.usage.output_tokens || 0;
       this.emit({ type: 'usage', usage: this.usage });
+      await this.#account(msg);
       if (msg.container?.id) this.containerRef = { id: msg.container.id, expiresAt: Date.parse(msg.container.expires_at) || 0 };
 
       const clean = msg.content.map(({ _invalidJson, ...b }) => b); // eslint-disable-line no-unused-vars
@@ -458,15 +506,17 @@ export class AgentSession {
 
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       if (this.abort.signal.aborted) throw new DOMException('aborted', 'AbortError');
+      await this.#checkBudget(settings);
       this.#compact();
       const system = await buildSystem({ mode, tabs: await tabGroups.tabs(this.id), quick: true });
       this.emit({ type: 'assistant_start' });
       const msg = await streamMessage(
-        { model, system, messages: this.messages, quick: true, effort: settings.effort, maxTokens: 4096 },
+        { model, system, messages: this.messages, quick: true, effort: settings.effort, maxTokens: 4096, task: this.title },
         { signal: this.abort.signal, onEvent: (ev) => this.#forward(ev) },
       );
       this.usage.input_tokens += msg.usage.input_tokens || 0;
       this.usage.output_tokens += msg.usage.output_tokens || 0;
+      await this.#account(msg);
       this.messages.push({ role: 'assistant', content: msg.content.length ? msg.content : [{ type: 'text', text: '(no output)' }] });
       if (msg.stop_reason === 'refusal') { this.messages.pop(); this.emit({ type: 'error', message: 'The model declined this request.' }); this.setStatus('error'); return; }
 
@@ -511,7 +561,7 @@ export class AgentSession {
       role: m.role,
       content: Array.isArray(m.content) ? m.content.map(stripForHistory) : m.content,
     }));
-    const entry = { id: this.id, title: this.title, kind: this.kind, createdAt: this.createdAt, updatedAt: Date.now(), status: this.status, messages: stripped, usage: this.usage };
+    const entry = { id: this.id, title: this.title, kind: this.kind, createdAt: this.createdAt, updatedAt: Date.now(), status: this.status, messages: stripped, usage: this.usage, cost: this.cost, currency: this.currency };
     const next = [entry, ...all.filter((c) => c.id !== this.id)].slice(0, HISTORY_LIMIT);
     await setLocal(STORAGE_KEYS.CONVERSATIONS, next);
   }
@@ -521,6 +571,8 @@ export class AgentSession {
     s.messages = entry.messages || [];
     s.createdAt = entry.createdAt;
     s.usage = entry.usage || s.usage;
+    s.cost = entry.cost || 0;
+    s.currency = entry.currency || '';
     s.task = entry.title;
     s.status = 'idle';
     return s;

@@ -13,7 +13,8 @@ import { popupApproval, getApproval, answerApproval } from './approvals.js';
 import { listShortcuts, saveShortcut, deleteShortcut, renderShortcut } from './shortcuts.js';
 import { listTasks, saveTask, deleteTask, rearmAll, markRun, taskIdFromAlarm } from './scheduler.js';
 import { startRecording, stopRecording, addStep, recordingState } from './recording.js';
-import { signOut, authStatus, inferaSignIn, refreshInferaAccount, inferaServer } from './auth.js';
+import { signOut, authStatus, inferaSignIn, refreshInferaAccount, inferaServer, inferaUsage } from './auth.js';
+import { spentToday } from './spend.js';
 import { overlay } from './page.js';
 import { executeTool } from './tools/executor.js';
 import { listMemory, forgetMemory, clearMemory } from './memory.js';
@@ -133,6 +134,20 @@ async function panelState(s) {
   };
 }
 
+// The Costs tab: the server's log (all devices) plus this browser's numbers.
+async function costLog(days = 30) {
+  const settings = await getSettings();
+  const conversations = (await getLocal(STORAGE_KEYS.CONVERSATIONS, []))
+    .filter((c) => c.cost > 0).map(({ id, title, cost, currency, updatedAt }) => ({ id, title, cost, currency, updatedAt }));
+  let server = null;
+  let error = null;
+  try { server = await inferaUsage(days); } catch (e) { error = e.message; }
+  return {
+    server, error, conversations, spentToday: await spentToday(),
+    settings: { taskBudget: settings.taskBudget, dailyBudget: settings.dailyBudget, webResearch: settings.webResearch !== false, effort: settings.effort, model: settings.model },
+  };
+}
+
 async function handlePanel(msg, s, port) {
   const windowId = s.windowId;
   switch (msg.type) {
@@ -201,6 +216,15 @@ async function handlePanel(msg, s, port) {
     case 'sign_out': await signOut(); return panelState(s);
     case 'refresh_account': await refreshInferaAccount(); return panelState(s);
     case 'state': return panelState(s);
+    case 'cost_log': return costLog(msg.days);
+    case 'set_budgets': {
+      const patch = {};
+      for (const k of ['taskBudget', 'dailyBudget']) if (msg[k] !== undefined) patch[k] = Math.max(0, Number(msg[k]) || 0);
+      for (const k of ['webResearch']) if (msg[k] !== undefined) patch[k] = !!msg[k];
+      if (['low', 'medium', 'high', 'xhigh', 'max'].includes(msg.effort)) patch.effort = msg.effort;
+      await updateSettings(patch);
+      return costLog(msg.days);
+    }
     default: throw new Error(`Unknown panel message ${msg.type}`);
   }
 }

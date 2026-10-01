@@ -120,3 +120,19 @@ dialog.capture::backdrop { background: rgba(0, 0, 0, .45); }
 .linkish { border: 0; background: none; padding: 0; color: var(--brand); cursor: pointer; font-size: 12.5px; }
 .linkish:hover { text-decoration: underline; }
 .account { margin-top: 14px; font-size: 12.5px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; }
+
+/* Costs */
+.task-cost { font-size: 11.5px; color: var(--muted, #888); margin-inline-start: 4px; }
+.cost-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 8px; }
+.cost-stats .stat { display: flex; flex-direction: column; gap: 2px; }
+.cost-stats .stat b { font-size: 16px; }
+.small { font-size: 12px; }
+.section-title { display: block; margin: 12px 0 6px; }
+.form label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; margin-top: 8px; }
+.form label.check { flex-direction: row; align-items: center; gap: 8px; }
+.ops summary { cursor: pointer; margin: 12px 0 6px; font-weight: 600; }
+.ops-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ops-table td { padding: 5px 4px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.ops-table td:last-child { text-align: end; white-space: nowrap; }
+.check-row { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; font-size: 12.5px; }
+.check-row input { width: auto; margin: 0; }

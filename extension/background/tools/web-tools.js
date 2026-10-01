@@ -23,7 +23,7 @@ function domainFilter(settings, policy) {
 export function webTools(settings, policy = {}) {
   const filter = domainFilter(settings, policy);
   return [
-    { type: 'web_search_20260318', name: 'web_search', max_uses: 8, response_inclusion: 'excluded', ...filter },
+    { type: 'web_search_20260318', name: 'web_search', max_uses: 5, response_inclusion: 'excluded', ...filter },
     { type: 'web_fetch_20260318', name: 'web_fetch', max_uses: 10, max_content_tokens: 40_000, response_inclusion: 'excluded', ...filter },
   ];
 }

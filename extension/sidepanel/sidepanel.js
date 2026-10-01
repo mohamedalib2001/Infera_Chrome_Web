@@ -62,6 +62,7 @@ function onEvent(ev) {
     case 'tool_start': curText = null; addToolCard(ev.id, ev.name, ev.input); break;
     case 'tool_result': finishToolCard(ev.id, ev.content, ev.isError); break;
     case 'citations': addSources(ev.sources); break;
+    case 'cost': showCost(ev.conversation, ev.currency, ev.balance); break;
     case 'permission_request': addApproval(ev.request); break;
     case 'plan_request': addPlan(ev.request); break;
     case 'error': addBanner(ev.message); break;
@@ -82,6 +83,7 @@ function loadState(s) {
   renderAuth();
   renderHistory(s.messages || []);
   setStatus(s.session.status);
+  showCost(s.session.cost, s.session.currency);
 }
 
 async function refreshConversations() {
@@ -332,20 +334,21 @@ function addBanner(message, info = false) {
 
 function addApproval(r) {
   const box = el('div', { class: 'approval', role: 'alertdialog' });
+  const budget = r.permissionType === 'BUDGET';
   const answer = (a) => {
     port.postMessage({ type: 'permission_response', id: r.id, answer: a });
     box.classList.add('done');
     box.querySelectorAll('button').forEach((b) => { b.disabled = true; });
   };
   box.append(
-    el('div', { class: 'head' }, el('img', { src: '../icons/icon32.png', width: 18, height: 18, alt: '' }), t('wantsTo'), el('span', { class: 'badge' }, r.permissionType || '')),
+    el('div', { class: 'head' }, el('img', { src: '../icons/icon32.png', width: 18, height: 18, alt: '' }), budget ? t('budgetTitle') : t('wantsTo'), budget ? null : el('span', { class: 'badge' }, r.permissionType || '')),
     el('div', { class: 'desc' }, r.description || ''),
     el('div', { class: 'site' }, r.netloc || r.url || ''),
     r.reason ? el('div', { class: 'reason' }, r.reason) : null,
     el('div', { class: 'actions' },
-      el('button', { class: 'btn primary small', onclick: () => answer('once') }, t('allowOnce')),
+      el('button', { class: 'btn primary small', onclick: () => answer('once') }, budget ? t('budgetContinue') : t('allowOnce')),
       r.allowAlways ? el('button', { class: 'btn small', onclick: () => answer('always') }, t('allowAlways')) : null,
-      el('button', { class: 'btn danger small', onclick: () => answer('deny') }, t('decline'))),
+      el('button', { class: 'btn danger small', onclick: () => answer('deny') }, budget ? t('budgetStop') : t('decline'))),
   );
   $('#messages').append(box);
   updateEmpty();
@@ -546,6 +549,99 @@ $('#btnHistory').addEventListener('click', async () => {
       el('button', { class: 'icon-btn', 'aria-label': t('delete'), onclick: async (e) => { e.stopPropagation(); loadState(await call('delete_conversation', { id: c.id })); $('#btnHistory').click(); } }, '×')),
     el('div', { class: 's' }, `${fmt(c.updatedAt)} · ${t(c.status) || c.status}`))));
 });
+
+// ---------------- costs ----------------
+const money = (n, cur = '') => { const v = Number(n) || 0; return `${v > 0 && v < 0.01 ? v.toFixed(4) : v.toFixed(2)}${cur ? ` ${cur}` : ''}`; };
+
+// What the open conversation has cost so far, next to the status.
+function showCost(amount, currency) {
+  const c = $('#taskCost');
+  c.hidden = !(amount > 0);
+  if (amount > 0) { c.textContent = `· ${money(amount, currency)}`; c.title = t('thisTask'); }
+}
+
+function stat(label, value) { return el('div', { class: 'stat' }, el('span', { class: 'muted' }, label), el('b', {}, value)); }
+
+async function openCosts() {
+  openDrawer(t('costs'), el('p', { class: 'muted' }, '…'));
+  let d;
+  try { d = await call('cost_log', { days: 30 }); } catch (e) { return openDrawer(t('costs'), el('p', { class: 'si-error' }, e.message)); }
+  renderCosts(d);
+}
+
+function renderCosts(d) {
+  const srv = d.server;
+  const cur = srv?.currency || state?.auth?.currency || '';
+  const rows = srv?.rows || [];
+  const parts = [];
+
+  // Totals
+  parts.push(el('div', { class: 'card cost-stats' },
+    srv?.balance !== null && srv?.balance !== undefined ? stat(t('balance'), money(srv.balance, cur)) : null,
+    stat(t('today'), money(srv ? srv.today : d.spentToday, cur)),
+    srv ? stat(t('thisMonth'), money(srv.month, cur)) : null));
+  if (d.error) parts.push(el('p', { class: 'muted small' }, `${t('costsLocalOnly')} (${d.error})`));
+
+  // How much of the history came from the prompt cache (a tenth of the price).
+  const tok = rows.reduce((a, r) => ({ input: a.input + r.input, read: a.read + r.cacheRead, write: a.write + r.cacheWrite }), { input: 0, read: 0, write: 0 });
+  const totalIn = tok.input + tok.read + tok.write;
+  if (totalIn > 0) parts.push(el('p', { class: 'muted small' }, `${t('cacheSaved')}: ${Math.round((tok.read / totalIn) * 100)}%`));
+
+  // Limits and cost settings
+  const s = d.settings;
+  const taskIn = el('input', { type: 'number', min: '0', step: '0.5', value: s.taskBudget ?? 0 });
+  const dayIn = el('input', { type: 'number', min: '0', step: '1', value: s.dailyBudget ?? 0 });
+  const effortSel = el('select', {}, ...['low', 'medium', 'high', 'xhigh'].map((e) => el('option', { value: e, selected: s.effort === e ? true : undefined }, t(`effort_${e}`))));
+  const webChk = el('input', { type: 'checkbox', checked: s.webResearch ? true : undefined });
+  const saved = el('span', { class: 'muted small' });
+  parts.push(el('div', { class: 'card form' },
+    el('b', {}, t('limits')),
+    el('label', {}, `${t('taskLimit')} (${cur})`, taskIn), el('p', { class: 'muted small' }, t('taskLimitHint')),
+    el('label', {}, `${t('dailyLimit')} (${cur})`, dayIn), el('p', { class: 'muted small' }, t('dailyLimitHint')),
+    el('label', {}, t('effortLabel'), effortSel), el('p', { class: 'muted small' }, t('effortHint')),
+    el('div', { class: 'check-row' }, webChk, el('span', {}, t('webResearchLabel'))),
+    el('div', { class: 'row' }, el('button', { class: 'btn primary small', onclick: async () => {
+      const nd = await call('set_budgets', { taskBudget: taskIn.value, dailyBudget: dayIn.value, effort: effortSel.value, webResearch: webChk.checked, days: 30 });
+      renderCosts(nd);
+    } }, t('save')), saved)));
+
+  // By task
+  const byTask = new Map();
+  for (const r of rows) {
+    const k = r.task || t('untitled');
+    const g = byTask.get(k) || { task: k, amount: 0, calls: 0, searches: 0, last: r.at };
+    g.amount += r.amount; g.calls += r.kind === 'model' ? 1 : 0; g.searches += r.searches;
+    byTask.set(k, g);
+  }
+  if (byTask.size) {
+    parts.push(el('b', { class: 'section-title' }, t('byTask')));
+    parts.push(...[...byTask.values()].slice(0, 30).map((g) => el('div', { class: 'card item' },
+      el('div', { class: 'row' }, el('div', { class: 't grow' }, g.task), el('b', {}, money(g.amount, cur))),
+      el('div', { class: 's' }, `${fmt(g.last)} · ${g.calls} ${t('calls')}${g.searches ? ` · ${g.searches} ${t('searches')}` : ''}`))));
+  } else if (d.conversations?.length) {
+    parts.push(el('b', { class: 'section-title' }, t('byTask')));
+    parts.push(...d.conversations.slice(0, 30).map((c) => el('div', { class: 'card item' },
+      el('div', { class: 'row' }, el('div', { class: 't grow' }, c.title), el('b', {}, money(c.cost, c.currency))),
+      el('div', { class: 's' }, fmt(c.updatedAt)))));
+  } else {
+    parts.push(el('p', { class: 'muted' }, t('noCosts')));
+  }
+
+  // Operations log
+  if (rows.length) {
+    const short = (m) => String(m || '').replace(/^claude-/, '').replace(/-(\d)-(\d)$/, ' $1.$2').replace(/-(\d)$/, ' $1');
+    const k = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
+    parts.push(el('details', { class: 'ops' }, el('summary', {}, `${t('operations')} (${rows.length})`),
+      el('table', { class: 'ops-table' }, el('tbody', {}, ...rows.slice(0, 200).map((r) => el('tr', {},
+        el('td', { class: 'muted' }, new Date(r.at).toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })),
+        el('td', {}, r.kind === 'search' ? `🔎 ${r.searches} ${t('searches')}` : short(r.model), el('div', { class: 'muted small' }, r.task || '')),
+        el('td', { class: 'muted small' }, r.kind === 'search' ? '' : `${k(r.input + r.cacheRead + r.cacheWrite)} → ${k(r.output)}`),
+        el('td', {}, money(r.amount, ''))))))));
+  }
+  openDrawer(t('costs'), parts);
+}
+
+$('#btnCosts').addEventListener('click', openCosts);
 
 // Shortcuts
 function shortcutForm(sc = {}) {

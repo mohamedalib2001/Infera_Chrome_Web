@@ -30,11 +30,26 @@ async function authHeaders(settings) {
   return { headers: h, betas: [], baseUrl: auth.baseUrl, mode: 'infera' };
 }
 
+// Cache breakpoint on the newest message: every step of a task re-sends the whole
+// history (screenshots included), and with this it is read back from the prompt
+// cache at a tenth of the price instead of being billed in full each time.
+// Markers don't change the conversation, so stored history stays untouched.
+const CACHEABLE = new Set(['text', 'image', 'document', 'tool_result']);
+function withCachedTail(messages) {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== 'user' || !Array.isArray(last.content)) return messages;
+  const i = last.content.findLastIndex((b) => CACHEABLE.has(b.type));
+  if (i < 0) return messages;
+  const content = last.content.slice();
+  content[i] = { ...content[i], cache_control: { type: 'ephemeral' } };
+  return [...messages.slice(0, -1), { ...last, content }];
+}
+
 function buildBody({ model, system, messages, tools, maxTokens, effort, quick, container, stream = true }) {
   const info = modelInfo(model);
   const id = baseModelId(model);
   const betas = [];
-  const body = { model: id, max_tokens: maxTokens ?? (stream ? 64000 : 16000), messages, stream };
+  const body = { model: id, max_tokens: maxTokens ?? (stream ? 64000 : 16000), messages: stream ? withCachedTail(messages) : messages, stream };
   if (system) body.system = system;
   // The code-execution container behind web search/fetch filtering, reused across turns.
   if (container) body.container = container;
@@ -70,7 +85,14 @@ function buildBody({ model, system, messages, tools, maxTokens, effort, quick, c
     betas.push('server-side-fallback-2026-07-01');
   }
   if (!quick && !disabledFeatures.has('context_management')) {
-    body.context_management = { edits: [{ type: 'clear_tool_uses_20250919' }] };
+    // Old tool results are cleared only on a large history, and in big steps, so
+    // the cached prefix isn't invalidated on every request.
+    body.context_management = { edits: [{
+      type: 'clear_tool_uses_20250919',
+      trigger: { type: 'input_tokens', value: 120_000 },
+      keep: { type: 'tool_uses', value: 4 },
+      clear_at_least: { type: 'input_tokens', value: 40_000 },
+    }] };
     betas.push('context-management-2025-06-27');
   }
   return { body, betas };
@@ -84,16 +106,18 @@ function featureFromError(msg) {
   return null;
 }
 
-async function post(path, reqBody, betas, signal) {
+async function post(path, reqBody, betas, signal, task = '') {
   const settings = await getSettings();
   const { headers, betas: authBetas, baseUrl, mode } = await authHeaders(settings);
   const allBetas = [...new Set([...authBetas, ...betas])];
   if (allBetas.length) headers['anthropic-beta'] = allBetas.join(',');
+  // Names the task in the person's cost log on inferaagent.com.
+  if (task) headers['x-infera-task'] = encodeURIComponent(String(task).slice(0, 100));
   const url = baseUrl.replace(/\/+$/, '') + path;
   let res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(reqBody), signal });
   if (mode === 'infera' && res.status === 401) {
     // Expired access token: refresh once and retry, otherwise ask to sign in again.
-    if (await handleInferaUnauthorized()) return post(path, reqBody, betas, signal);
+    if (await handleInferaUnauthorized()) return post(path, reqBody, betas, signal, task);
     throw new ApiError(401, 'authentication_error', 'Your INFERA Agent session has ended. Sign in again from the side panel.');
   }
   return res;
@@ -110,7 +134,7 @@ class ApiError extends Error {
 async function request(params, signal) {
   for (let attempt = 0; attempt < 4; attempt++) {
     const { body, betas } = buildBody(params);
-    const res = await post('/v1/messages', body, betas, signal);
+    const res = await post('/v1/messages', body, betas, signal, params.task);
     if (res.ok) return res;
     let err = {};
     try { err = (await res.json()).error || {}; } catch { /* non-JSON */ }
@@ -182,6 +206,10 @@ export async function streamMessage(params, { signal, onEvent = () => {} } = {})
         if (data.delta?.container) msg.container = data.delta.container;
         Object.assign(msg.usage, data.usage || {});
         break;
+      case 'infera_usage':
+        // Added by the INFERA Agent gateway after the message: what this call cost.
+        msg.charge = { amount: Number(data.amount) || 0, currency: data.currency || '', balance: data.balance ?? null, charged: data.charged !== false };
+        break;
       case 'error':
         throw new ApiError(0, data.error?.type || 'stream_error', data.error?.message || 'Stream error');
       default:
@@ -214,9 +242,9 @@ export async function streamMessage(params, { signal, onEvent = () => {} } = {})
 }
 
 // Small non-streaming helper call (find tool, safety checker, step descriptions).
-export async function completeText({ model, system, prompt, maxTokens = 800, signal }) {
+export async function completeText({ model, system, prompt, maxTokens = 800, signal, task }) {
   const res = await request({
-    model, system, messages: [{ role: 'user', content: prompt }], maxTokens, stream: false,
+    model, system, messages: [{ role: 'user', content: prompt }], maxTokens, stream: false, task,
   }, signal);
   const data = await res.json();
   if (data.stop_reason === 'refusal') throw new Error('The helper model declined this request.');

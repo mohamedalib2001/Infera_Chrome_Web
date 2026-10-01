@@ -4,7 +4,7 @@ import { STORAGE_KEYS, DEFAULT_MODEL, PERMISSION_MODES } from './constants.js';
 export const DEFAULT_SETTINGS = {
   inferaUrl: '',   // unpacked developer builds only: a local test server (see auth.js)
   model: DEFAULT_MODEL,
-  effort: 'high',
+  effort: 'medium',   // Opus 5.5 at medium beats Opus 5 at high, for far fewer tokens
   permissionMode: PERMISSION_MODES.AUTO,
   safetyChecker: true,
   language: 'auto',
@@ -17,6 +17,8 @@ export const DEFAULT_SETTINGS = {
   defaultKeepTabs: false,
   webResearch: true,   // web search + web fetch (server tools) with models that support them
   memory: true,        // long-term memory of the user's preferences
+  taskBudget: 3,       // per task, in the account currency: ask before spending more (0 = no limit)
+  dailyBudget: 0,      // per day, in the account currency: stop tasks once reached (0 = no limit)
 };
 
 export async function getLocal(key, fallback) {

@@ -133,6 +133,24 @@ If an endpoint rejects the toolset, the session falls back to the classic tools 
   in `<attached_files>` as `/attachments/<name>`: the browser toolset's `file_upload` (and the classic
   `file_upload` via `paths`) puts it into a page's file input.
 
+## Costs
+
+* **Prompt caching of the history** (`llm.js`): every step re-sends the whole conversation, so the newest
+  message carries a cache breakpoint (with the tools and the system prompt: 3 of the 4 allowed); the
+  history is then read back at a tenth of the input price instead of being billed in full each step.
+  Old tool results are cleared only above 120k input tokens, at least 40k at a time, keeping the last
+  4 — so clearing doesn't invalidate the cache on every request. Default effort is `medium`; web search
+  is capped at 5 searches per request.
+* **Charges reported per call**: the gateway appends an `infera_usage` SSE event (amount, currency,
+  balance) after each call; the extension names the task in `x-infera-task` so the server log groups by
+  task. The side panel shows the open conversation's cost next to the status.
+* **Limits** (`spend.js`, `agent.js`): `taskBudget` (default 3 in the account currency) — when a task
+  reaches it the agent asks "Continue / Stop here" (approval type `BUDGET`) and continues in steps of the
+  same amount; `dailyBudget` (default off) stops tasks once today's spending in this browser reaches it.
+* **Costs tab** (side panel): balance, today and this month (from `GET /api/browser-agent/usage`, all
+  devices), the share of history served from the cache, the limits and cost settings, spending by task,
+  and the operations log (time, model, tokens in → out, amount; searches separately).
+
 Preserved thinking (Opus 5.5 / Fable 5.1): the system prompt and tool list are fixed for a
 conversation (later mode changes and site know-how are appended as `<system-reminder>` notes, never
 edited in), the history is append-only, and requests set

@@ -27,6 +27,16 @@ const start = (id) => ({ type: 'message_start', message: { id, model: 'claude-op
 let phase = 'normal';
 const mcpCalls = [];
 const server = http.createServer((req, res) => {
+  if (req.url.startsWith('/api/browser-agent/usage')) {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    const at = new Date().toISOString();
+    res.end(JSON.stringify({ currency: 'SAR', owner: false, balance: 27.5, today: 1.25, month: 8.4, rows: [
+      { id: 3, at, kind: 'model', task: 'Compare prices', model: 'claude-opus-5-5', searches: 0, input: 1200, output: 900, cacheRead: 40000, cacheWrite: 2000, amount: 0.31, charged: true },
+      { id: 2, at, kind: 'search', task: 'Compare prices', model: null, searches: 2, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, amount: 0.08, charged: true },
+      { id: 1, at, kind: 'model', task: 'Summarize this page', model: 'claude-opus-5-5', searches: 0, input: 8000, output: 600, cacheRead: 0, cacheWrite: 8000, amount: 0.22, charged: true },
+    ] }));
+    return;
+  }
   if (req.url === '/mcp' && req.method === 'POST') {
     let body = '';
     req.on('data', (c) => { body += c; });
@@ -89,6 +99,15 @@ const server = http.createServer((req, res) => {
           { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Done with the browser toolset.' } },
           { type: 'content_block_stop', index: 0 },
           { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }]);
+      }
+      if (phase === 'budget') {
+        // Every call costs 0.40 SAR (reported by the gateway after message_stop) and asks for one more step.
+        return sse(res, [start('bg' + n),
+          { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'w' + n, name: 'computer', input: {} } },
+          { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: JSON.stringify({ action: 'wait', duration: 0, tabId: globalThis.TAB }) } },
+          { type: 'content_block_stop', index: 0 },
+          { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5 } }, { type: 'message_stop' },
+          { type: 'infera_usage', amount: 0.4, currency: 'SAR', balance: 20, charged: true }]);
       }
       if (phase === 'web' || phase === 'plain') {
         const tu = (index, id, name, input, toolset = false) => [
@@ -215,7 +234,12 @@ check('events streamed', ['thinking_delta', 'text_delta', 'tool_start', 'tool_re
 const req2 = requests[1]?.body;
 check('two API requests', requests.length === 2, String(requests.length));
 check('headers: version + INFERA session token, no API key', requests[0].headers['anthropic-version'] === '2023-06-01' && requests[0].headers.authorization === 'Bearer inf_test' && !requests[0].headers['x-api-key'] && !requests[0].headers['anthropic-dangerous-direct-browser-access']);
-check('adaptive thinking + effort', requests[0].body.thinking?.type === 'adaptive' && requests[0].body.output_config?.effort === 'high');
+check('adaptive thinking + effort (medium by default)', requests[0].body.thinking?.type === 'adaptive' && requests[0].body.output_config?.effort === 'medium');
+const lastBlock = (b) => b.messages.at(-1).content.at(-1);
+check('history cached: breakpoint on the newest message only', !!lastBlock(requests[1].body).cache_control && !requests[1].body.messages[0].content.some((c) => c.cache_control));
+const cm = requests[0].body.context_management?.edits?.[0];
+check('old tool results cleared rarely and in big steps', cm?.trigger?.value === 120000 && cm?.clear_at_least?.value === 40000 && cm?.keep?.value === 4);
+check('task named for the cost log', decodeURIComponent(requests[0].headers['x-infera-task'] || '') === 'What is on this page?');
 const t0 = requests[0].body.tools;
 check('tools: web search/fetch first, own tools w/ eager streaming, memory, cache_control',
   t0.length === 27 && t0[0].type === 'web_search_20260318' && t0[0].response_inclusion === 'excluded' && t0[1].type === 'web_fetch_20260318'
@@ -258,7 +282,7 @@ check('toolset: browser_toolset_20260801 offered, replaced tools removed',
   && !q1.tools.some((t) => ['computer', 'navigate', 'read_page', 'find', 'tabs_create', 'browser_batch'].includes(t.name))
   && q1.tools.some((t) => t.name === 'update_plan') && q1.tools.some((t) => t.name === 'gif_creator'), q1.tools.map((t) => t.name || t.type).join(','));
 check('toolset: preserved thinking drop_block + fallbacks',
-  q1.thinking?.block_binding?.prefix_mismatch_behavior === 'drop_block' && requests[0].headers['anthropic-beta'].includes('thinking-binding-controls-2026-08-01') && q1.fallbacks === 'default' && q1.output_config?.effort === 'high');
+  q1.thinking?.block_binding?.prefix_mismatch_behavior === 'drop_block' && requests[0].headers['anthropic-beta'].includes('thinking-binding-controls-2026-08-01') && q1.fallbacks === 'default' && q1.output_config?.effort === 'medium');
 const tr1 = q2.messages.at(-1).content.filter((b) => b.type === 'tool_result');
 check('toolset: every result echoes toolset_name', tr1.length === 4 && tr1.every((b) => b.toolset_name === 'browser'));
 const state1 = tr1[0].content.find((c) => c.type === 'browser_state');
@@ -269,7 +293,9 @@ const tr2 = q3.messages.at(-1).content.filter((b) => b.type === 'tool_result');
 check('toolset: new_tab returns exactly one browser_state with tab_opened', tr2.length === 1 && tr2[0].content.length === 1 && tr2[0].content[0].type === 'browser_state' && tr2[0].content[0].state_changes?.[0]?.type === 'tab_opened', JSON.stringify(tr2[0]?.content));
 check('toolset: tool_use blocks sent back with toolset_name', q2.messages[1].content.filter((b) => b.type === 'tool_use').every((b) => b.toolset_name === 'browser'));
 check('system prompt frozen across turns', JSON.stringify(q1.system) === JSON.stringify(q3.system) && JSON.stringify(q1.tools) === JSON.stringify(q3.tools));
-check('history is append-only', JSON.stringify(q3.messages.slice(0, q2.messages.length)) === JSON.stringify(q2.messages));
+// The moving cache marker is not part of the conversation (it doesn't invalidate thinking).
+const noMarks = (msgs) => JSON.stringify(msgs, (k, v) => (k === 'cache_control' ? undefined : v));
+check('history is append-only', noMarks(q3.messages.slice(0, q2.messages.length)) === noMarks(q2.messages));
 await sw.evaluate(async () => { // close the tab the toolset opened
   const tabs = await chrome.tabs.query({ url: 'about:blank' });
   for (const t of tabs) await chrome.tabs.remove(t.id).catch(() => {});
@@ -311,6 +337,41 @@ check('memory: shown at the start of a new conversation', JSON.stringify(request
 await sw.evaluate(() => self.__infera.updateSettings({ userBlocklist: [] }));
 phase = 'normal';
 
+// Costs: each call's charge is reported; the task limit asks; the daily limit stops.
+requests.length = 0;
+phase = 'budget';
+const budget = await sw.evaluate(async ({ tabId }) => {
+  const I = self.__infera;
+  await chrome.storage.local.remove('spendByDay');
+  await I.updateSettings({ taskBudget: 1, dailyBudget: 0 });
+  const s = new I.AgentSession({ kind: 'panel' });
+  const costs = [];
+  let asked = null;
+  s.subscribe((e) => {
+    if (e.type === 'cost') costs.push(e.task);
+    if (e.type === 'permission_request') { asked = e.request; s.answer(e.request.id, 'deny'); }
+  });
+  await s.run('Keep waiting', { startTabId: tabId });
+  const today = (await chrome.storage.local.get('spendByDay')).spendByDay;
+  return { status: s.status, costs, asked, cost: s.summary().cost, currency: s.currency, today };
+}, { tabId });
+check('costs: each call reported live', budget.costs.length === 3 && Math.abs(budget.costs[2] - 1.2) < 1e-9 && budget.currency === 'SAR', JSON.stringify(budget.costs));
+check('costs: task limit asks before spending more, and stops on "Stop"', requests.length === 3 && budget.asked?.permissionType === 'BUDGET' && budget.status === 'stopped', `${requests.length} ${budget.status} ${budget.asked?.description}`);
+check('costs: spending kept per day', Math.abs(Object.values(budget.today || {})[0] - 1.2) < 1e-9);
+requests.length = 0;
+const daily = await sw.evaluate(async ({ tabId }) => {
+  const I = self.__infera;
+  await I.updateSettings({ taskBudget: 0, dailyBudget: 1 });
+  const s = new I.AgentSession({ kind: 'panel' });
+  const infos = [];
+  s.subscribe((e) => { if (e.type === 'info') infos.push(e.message); });
+  await s.run('More', { startTabId: tabId });
+  await I.updateSettings({ taskBudget: 3, dailyBudget: 0 });
+  return { status: s.status, infos };
+}, { tabId });
+check('costs: daily limit stops before any call', requests.length === 0 && daily.status === 'stopped' && /limit/i.test(daily.infos.join(' ')), JSON.stringify(daily));
+phase = 'normal';
+
 // Without an INFERA Agent session nothing is sent, even with an API key in storage.
 requests.length = 0;
 const noAuth = await sw.evaluate(async () => {
@@ -346,6 +407,14 @@ await sp.waitForTimeout(200);
 await sp.locator('.drawer-body .btn.primary').first().click();
 await sp.waitForTimeout(200);
 await sp.screenshot({ path: path.join(outDir, 'sidepanel-shortcut.png') });
+await sp.locator('#drawerClose').click();
+await sp.locator('#btnCosts').click();
+await sp.waitForSelector('.cost-stats', { timeout: 5000 }).catch(() => {});
+await sp.waitForTimeout(300);
+await sp.screenshot({ path: path.join(outDir, 'sidepanel-costs-top.png') });
+await sp.locator('.ops summary').click().catch(() => {});
+await sp.screenshot({ path: path.join(outDir, 'sidepanel-costs.png'), fullPage: true });
+check('Costs tab: totals, limits, tasks and the operations log', (await sp.locator('.cost-stats .stat').count()) === 3 && (await sp.locator('.ops-table tr').count()) === 3 && (await sp.locator('#drawerBody .card.item').count()) === 2);
 check('side panel has no page errors', pageErrors.length === 0, pageErrors.join('; '));
 const op = await ctx.newPage();
 await op.setViewportSize({ width: 900, height: 1200 });
