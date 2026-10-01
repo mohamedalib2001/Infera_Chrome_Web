@@ -511,6 +511,28 @@ await sp.locator('#drawerBody .btn.primary').first().click();
 await sp.waitForTimeout(500);
 check('Costs tab: the daily limit is the account\'s, saved on the server', shownDaily === '2' && globalThis.LIMIT === 7, `${shownDaily} ${globalThis.LIMIT}`);
 check('side panel has no page errors', pageErrors.length === 0, pageErrors.join('; '));
+// Microphone refused: one settings tab, no restart loop (it used to open a tab per retry).
+const mic = await ctx.newPage();
+await mic.addInitScript(() => {
+  globalThis.__starts = 0;
+  class FakeSR { start() { globalThis.__starts++; setTimeout(() => { this.onerror?.({ error: 'not-allowed' }); this.onend?.(); }, 20); } stop() {} abort() {} }
+  globalThis.webkitSpeechRecognition = FakeSR;
+  globalThis.SpeechRecognition = FakeSR;
+});
+await mic.goto(`chrome-extension://${extId}/sidepanel/sidepanel.html`);
+await mic.waitForTimeout(800);
+await mic.goto(`${base}/test.html`);
+await mic.goto(`chrome-extension://${extId}/sidepanel/sidepanel.html`);
+await mic.waitForTimeout(600);
+await mic.locator('#btnRecord').click();
+await mic.waitForTimeout(300);
+await mic.locator('#drawerBody .btn.primary').first().click();
+await mic.waitForTimeout(2500);
+const micTabs = ctx.pages().filter((pg) => pg.url().includes('options/options.html')).length;
+const starts = await mic.evaluate(() => globalThis.__starts);
+check('microphone refused: one settings tab, no restart loop', micTabs === 1 && starts === 1, `tabs=${micTabs} starts=${starts}`);
+for (const pg of ctx.pages()) if (pg.url().includes('options/options.html')) await pg.close();
+await mic.close();
 const op = await ctx.newPage();
 await op.setViewportSize({ width: 900, height: 1200 });
 op.on('pageerror', (e) => pageErrors.push(e.message));

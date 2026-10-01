@@ -796,11 +796,38 @@ function startMic(liveEl) {
     for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) transcript += e.results[i][0].transcript + ' ';
     liveEl.textContent = transcript;
   };
+  const me = recog;
+  let restarts = 0;
   recog.onerror = (e) => {
-    if (e.error === 'not-allowed') chrome.tabs.create({ url: chrome.runtime.getURL('options/options.html#mic') });
+    // No microphone permission (or no microphone): stop for good — restarting would fail
+    // again at once — and open the settings page once to grant it.
+    if (['not-allowed', 'service-not-allowed', 'audio-capture'].includes(e.error)) {
+      if (recog === me) recog = null;
+      try { me.abort(); } catch { /* ignore */ }
+      addBanner(t('micDenied'));
+      if (e.error !== 'audio-capture') openMicSettings();
+    }
   };
-  recog.onend = () => { if (recog) try { recog.start(); } catch { /* ignore */ } };
+  recog.onresult = ((orig) => (e) => { restarts = 0; orig(e); })(recog.onresult);
+  // Speech recognition ends on silence; keep it going while recording, but never in a tight loop.
+  recog.onend = () => {
+    if (recog !== me) return;
+    if (++restarts > 5) { recog = null; return; }
+    setTimeout(() => { if (recog === me) try { me.start(); } catch { /* ignore */ } }, 300);
+  };
   try { recog.start(); } catch { /* ignore */ }
+}
+
+// One settings tab for the microphone permission: focus it if it's already open.
+async function openMicSettings() {
+  const url = chrome.runtime.getURL('options/options.html');
+  const [open] = await chrome.tabs.query({ url: `${url}*` });
+  if (open) {
+    await chrome.tabs.update(open.id, { active: true, url: `${url}#mic` });
+    await chrome.windows.update(open.windowId, { focused: true });
+  } else {
+    await chrome.tabs.create({ url: `${url}#mic` });
+  }
 }
 $('#btnRecord').addEventListener('click', showRecorder);
 
