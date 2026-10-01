@@ -57,6 +57,11 @@ async function resolveTab(ctx, tabIdArg, { allowRestricted = false } = {}) {
   const tab = await getTab(tabIdArg);
   const url = tab.url || tab.pendingUrl || '';
   if (!allowRestricted && isRestrictedUrl(url)) {
+    let host = '';
+    try { host = new URL(url).hostname; } catch { /* not a URL */ }
+    if (/^(chromewebstore|chrome)\.google\.com$|^microsoftedge\.microsoft\.com$/.test(host)) {
+      fail(`This page (${url.split('?')[0]}) is an extension store page. The browser blocks every extension from reading or controlling extension store pages, so no tool can act here. Tell the user plainly that they need to do this part themselves, and give them short steps.`);
+    }
     fail(`This page (${url.split('?')[0]}) is a browser or extension page where only "navigate" works. Navigate to a website first.`);
   }
   const st = cdp.tabs.get(tabIdArg);
