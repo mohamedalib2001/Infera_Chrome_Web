@@ -393,6 +393,7 @@ export class AgentSession {
       ...extras(),
     ];
     let tools = toolList(toolset);
+    let paused = false;
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       if (this.abort.signal.aborted) throw new DOMException('aborted', 'AbortError');
       await this.#checkBudget(settings);
@@ -431,7 +432,11 @@ export class AgentSession {
       if (msg.container?.id) this.containerRef = { id: msg.container.id, expiresAt: Date.parse(msg.container.expires_at) || 0 };
 
       const clean = msg.content.map(({ _invalidJson, ...b }) => b); // eslint-disable-line no-unused-vars
-      this.messages.push({ role: 'assistant', content: clean });
+      // A turn resumed after pause_turn continues the same assistant message.
+      const last = this.messages[this.messages.length - 1];
+      if (paused && last?.role === 'assistant') last.content = [...last.content, ...clean];
+      else this.messages.push({ role: 'assistant', content: clean });
+      paused = msg.stop_reason === 'pause_turn';
 
       if (msg.stop_reason === 'refusal') {
         this.emit({ type: 'error', message: `The model declined this request${msg.stop_details?.explanation ? `: ${msg.stop_details.explanation}` : '.'}` });

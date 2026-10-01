@@ -35,18 +35,35 @@ async function authHeaders(settings) {
 // cache at a tenth of the price instead of being billed in full each time.
 // Markers don't change the conversation, so stored history stays untouched.
 const CACHEABLE = new Set(['text', 'image', 'document', 'tool_result']);
-// The API rejects empty text blocks (e.g. a message that was only an attachment),
-// including ones already saved in an older conversation.
-function withoutEmptyText(messages) {
-  return messages.map((m) => {
-    if (!Array.isArray(m.content) || !m.content.some((b) => b.type === 'text' && !b.text?.trim())) return m;
-    const content = m.content.filter((b) => !(b.type === 'text' && !b.text?.trim()));
-    return { ...m, content: content.length ? content : [{ type: 'text', text: '(empty message)' }] };
+// Make a history the API accepts, including ones saved by older versions:
+// - consecutive assistant messages (a turn resumed after pause_turn) become one;
+// - a server tool call (web search/fetch, code execution) whose result never came
+//   (the step was stopped or failed) is dropped, except at the very end, where a
+//   paused turn is resumed;
+// - empty text blocks (e.g. a message that was only an attachment) are dropped.
+const blocksOf = (c) => (Array.isArray(c) ? c : [{ type: 'text', text: String(c ?? '') }]);
+function sanitizeMessages(messages) {
+  const merged = [];
+  for (const m of messages) {
+    const prev = merged[merged.length - 1];
+    if (prev && prev.role === 'assistant' && m.role === 'assistant') merged[merged.length - 1] = { ...prev, content: [...blocksOf(prev.content), ...blocksOf(m.content)] };
+    else merged.push(m);
+  }
+  return merged.map((m, i) => {
+    if (!Array.isArray(m.content)) return m;
+    let content = m.content;
+    if (m.role === 'assistant' && i < merged.length - 1) {
+      const answered = new Set(content.filter((b) => b.tool_use_id && b.type !== 'tool_result').map((b) => b.tool_use_id));
+      content = content.filter((b) => b.type !== 'server_tool_use' || answered.has(b.id));
+    }
+    content = content.filter((b) => !(b.type === 'text' && !b.text?.trim()));
+    if (content.length === m.content.length) return m;
+    return { ...m, content: content.length ? content : [{ type: 'text', text: m.role === 'user' ? '(empty message)' : '(no reply)' }] };
   });
 }
 
 function withCachedTail(messages) {
-  messages = withoutEmptyText(messages);
+  messages = sanitizeMessages(messages);
   const last = messages[messages.length - 1];
   if (!last || last.role !== 'user' || !Array.isArray(last.content)) return messages;
   const i = last.content.findLastIndex((b) => CACHEABLE.has(b.type));
@@ -60,7 +77,7 @@ function buildBody({ model, system, messages, tools, maxTokens, effort, quick, c
   const info = modelInfo(model);
   const id = baseModelId(model);
   const betas = [];
-  const body = { model: id, max_tokens: maxTokens ?? (stream ? 64000 : 16000), messages: stream ? withCachedTail(messages) : withoutEmptyText(messages), stream };
+  const body = { model: id, max_tokens: maxTokens ?? (stream ? 64000 : 16000), messages: stream ? withCachedTail(messages) : sanitizeMessages(messages), stream };
   if (system) body.system = system;
   // The code-execution container behind web search/fetch filtering, reused across turns.
   if (container) body.container = container;

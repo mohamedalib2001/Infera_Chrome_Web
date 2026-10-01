@@ -386,6 +386,26 @@ const fileOnly = await sw.evaluate(async ({ tabId }) => {
 }, { tabId });
 const sent = requests[0]?.body.messages || [];
 check('files: attachment-only message sends no empty text block', fileOnly.status === 'done' && sent.length > 0 && sent.every((m) => !Array.isArray(m.content) || m.content.every((b) => b.type !== 'text' || b.text.trim())) && JSON.stringify(sent).includes('/attachments/pkg.zip') && fileOnly.title === 'pkg.zip', JSON.stringify({ fileOnly, sent }).slice(0, 400));
+// A history with a turn resumed after pause_turn (two assistant messages) and a
+// server tool call whose result never came (the step was stopped): both are
+// repaired before sending.
+requests.length = 0;
+const repaired = await sw.evaluate(async ({ tabId }) => {
+  const s = new self.__infera.AgentSession({ kind: 'panel' });
+  s.classicTools = false;
+  s.messages.push(
+    { role: 'user', content: [{ type: 'text', text: 'search' }] },
+    { role: 'assistant', content: [{ type: 'server_tool_use', id: 'srvtoolu_a', name: 'web_search', input: { query: 'x' } }, { type: 'server_tool_use', id: 'srvtoolu_b', name: 'bash_code_execution', input: { command: 'ls' } }] },
+    { role: 'assistant', content: [{ type: 'web_search_tool_result', tool_use_id: 'srvtoolu_a', content: [] }, { type: 'text', text: 'found' }] },
+    { role: 'user', content: [{ type: 'text', text: 'more' }] },
+    { role: 'assistant', content: [{ type: 'server_tool_use', id: 'srvtoolu_c', name: 'bash_code_execution', input: { command: 'ls' } }] },
+  );
+  await s.run('next', { startTabId: tabId });
+  return s.status;
+}, { tabId });
+const sent2 = requests[0]?.body.messages || [];
+const flat2 = JSON.stringify(sent2);
+check('history: paused turn merged, unanswered server tool calls dropped', repaired === 'done' && sent2[1]?.role === 'assistant' && sent2[2]?.role === 'user' && flat2.includes('srvtoolu_a') && !flat2.includes('srvtoolu_b') && !flat2.includes('srvtoolu_c'), flat2.slice(0, 600));
 await sw.evaluate(() => self.__infera.updateSettings({ userBlocklist: [] }));
 phase = 'normal';
 
