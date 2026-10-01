@@ -18,7 +18,6 @@ export const DEFAULT_SETTINGS = {
   webResearch: true,   // web search + web fetch (server tools) with models that support them
   memory: true,        // long-term memory of the user's preferences
   taskBudget: 3,       // per task, in the account currency: ask before spending more (0 = no limit)
-  dailyBudget: 0,      // per day, in the account currency: stop tasks once reached (0 = no limit)
 };
 
 export async function getLocal(key, fallback) {

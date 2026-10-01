@@ -27,6 +27,16 @@ const start = (id) => ({ type: 'message_start', message: { id, model: 'claude-op
 let phase = 'normal';
 const mcpCalls = [];
 const server = http.createServer((req, res) => {
+  if (req.url.startsWith('/api/browser-agent/limits')) {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      if (req.method === 'PUT') globalThis.LIMIT = JSON.parse(body).daily;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ owner: false, daily: globalThis.LIMIT ?? 2, currency: 'SAR', spentToday: 1.25, source: 'account' }));
+    });
+    return;
+  }
   if (req.url.startsWith('/api/browser-agent/usage')) {
     res.writeHead(200, { 'content-type': 'application/json' });
     const at = new Date().toISOString();
@@ -97,6 +107,22 @@ const server = http.createServer((req, res) => {
         return sse(res, [start('b3'),
           { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
           { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Done with the browser toolset.' } },
+          { type: 'content_block_stop', index: 0 },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }]);
+      }
+      if (phase === 'queue') {
+        // One step, then an answer; the user writes while the first step runs.
+        const k = j.messages.filter((m) => m.role === 'assistant').length;
+        if (k === 0) {
+          return setTimeout(() => sse(res, [start('qq1'),
+            { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'qw1', name: 'computer', input: {} } },
+            { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: JSON.stringify({ action: 'wait', duration: 0, tabId: globalThis.TAB }) } },
+            { type: 'content_block_stop', index: 0 },
+            { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }]), 300);
+        }
+        return sse(res, [start('qq2'),
+          { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+          { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Done, including your extra request.' } },
           { type: 'content_block_stop', index: 0 },
           { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }]);
       }
@@ -337,13 +363,42 @@ check('memory: shown at the start of a new conversation', JSON.stringify(request
 await sw.evaluate(() => self.__infera.updateSettings({ userBlocklist: [] }));
 phase = 'normal';
 
+// A message sent while a task runs joins it at the next step.
+requests.length = 0;
+phase = 'queue';
+const queued = await sw.evaluate(async ({ tabId }) => {
+  const s = new self.__infera.AgentSession({ kind: 'panel' });
+  const p = s.run('Wait a moment', { startTabId: tabId });
+  await new Promise((r) => setTimeout(r, 100));
+  s.enqueue('Also tell me the page title');
+  await p;
+  return { status: s.status, last: s.messages.at(-1).content.map((b) => b.text || '').join('') };
+}, { tabId });
+check('queue: a message sent mid-task reaches the next step', requests.length === 2 && JSON.stringify(requests[1].body.messages.at(-1)).includes('Also tell me the page title') && queued.status === 'done', `${requests.length} ${queued.status}`);
+
+// The side panel comes back to its conversation after the service worker restarts.
+const restored = await sw.evaluate(async () => {
+  const I = self.__infera;
+  const win = (await chrome.windows.getCurrent()).id;
+  const s = await I.sessionForWindow(win);
+  s.title = 'Restore me';
+  s.messages = [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }, { role: 'assistant', content: [{ type: 'text', text: 'hi' }] }];
+  const all = (await chrome.storage.local.get('conversations')).conversations || [];
+  await chrome.storage.local.set({ conversations: [{ id: s.id, title: s.title, kind: 'panel', createdAt: Date.now(), updatedAt: Date.now(), status: 'done', messages: s.messages, usage: s.usage }, ...all] });
+  await new Promise((r) => setTimeout(r, 100));
+  I.sessions.clear(); // what a service worker restart does to memory
+  const back = await I.sessionForWindow(win);
+  return { same: back.id === s.id, msgs: back.messages.length, title: back.title };
+});
+check('panel returns to the same conversation after a restart', restored.same && restored.msgs === 2 && restored.title === 'Restore me', JSON.stringify(restored));
+
 // Costs: each call's charge is reported; the task limit asks; the daily limit stops.
 requests.length = 0;
 phase = 'budget';
 const budget = await sw.evaluate(async ({ tabId }) => {
   const I = self.__infera;
   await chrome.storage.local.remove('spendByDay');
-  await I.updateSettings({ taskBudget: 1, dailyBudget: 0 });
+  await I.updateSettings({ taskBudget: 1 });
   const s = new I.AgentSession({ kind: 'panel' });
   const costs = [];
   let asked = null;
@@ -353,23 +408,12 @@ const budget = await sw.evaluate(async ({ tabId }) => {
   });
   await s.run('Keep waiting', { startTabId: tabId });
   const today = (await chrome.storage.local.get('spendByDay')).spendByDay;
+  await I.updateSettings({ taskBudget: 3 });
   return { status: s.status, costs, asked, cost: s.summary().cost, currency: s.currency, today };
 }, { tabId });
 check('costs: each call reported live', budget.costs.length === 3 && Math.abs(budget.costs[2] - 1.2) < 1e-9 && budget.currency === 'SAR', JSON.stringify(budget.costs));
 check('costs: task limit asks before spending more, and stops on "Stop"', requests.length === 3 && budget.asked?.permissionType === 'BUDGET' && budget.status === 'stopped', `${requests.length} ${budget.status} ${budget.asked?.description}`);
 check('costs: spending kept per day', Math.abs(Object.values(budget.today || {})[0] - 1.2) < 1e-9);
-requests.length = 0;
-const daily = await sw.evaluate(async ({ tabId }) => {
-  const I = self.__infera;
-  await I.updateSettings({ taskBudget: 0, dailyBudget: 1 });
-  const s = new I.AgentSession({ kind: 'panel' });
-  const infos = [];
-  s.subscribe((e) => { if (e.type === 'info') infos.push(e.message); });
-  await s.run('More', { startTabId: tabId });
-  await I.updateSettings({ taskBudget: 3, dailyBudget: 0 });
-  return { status: s.status, infos };
-}, { tabId });
-check('costs: daily limit stops before any call', requests.length === 0 && daily.status === 'stopped' && /limit/i.test(daily.infos.join(' ')), JSON.stringify(daily));
 phase = 'normal';
 
 // Without an INFERA Agent session nothing is sent, even with an API key in storage.
@@ -415,6 +459,12 @@ await sp.screenshot({ path: path.join(outDir, 'sidepanel-costs-top.png') });
 await sp.locator('.ops summary').click().catch(() => {});
 await sp.screenshot({ path: path.join(outDir, 'sidepanel-costs.png'), fullPage: true });
 check('Costs tab: totals, limits, tasks and the operations log', (await sp.locator('.cost-stats .stat').count()) === 3 && (await sp.locator('.ops-table tr').count()) === 3 && (await sp.locator('#drawerBody .card.item').count()) === 2);
+const dayField = sp.locator('#drawerBody input[type=number]').nth(1);
+const shownDaily = await dayField.inputValue();
+await dayField.fill('7');
+await sp.locator('#drawerBody .btn.primary').first().click();
+await sp.waitForTimeout(500);
+check('Costs tab: the daily limit is the account\'s, saved on the server', shownDaily === '2' && globalThis.LIMIT === 7, `${shownDaily} ${globalThis.LIMIT}`);
 check('side panel has no page errors', pageErrors.length === 0, pageErrors.join('; '));
 const op = await ctx.newPage();
 await op.setViewportSize({ width: 900, height: 1200 });

@@ -197,6 +197,22 @@ export async function inferaUsage(days = 30, retried = false) {
   }
 }
 
+// The daily browser-agent limit stored on inferaagent.com (shared with the app's
+// Owner dashboard for the owner). daily = undefined reads it, a number sets it.
+export async function inferaLimits(daily, retried = false) {
+  const a = await currentInfera();
+  if (!a) throw new Error('Sign in to see your limits.');
+  try {
+    return await inferaFetch(`${a.server}/api/browser-agent/limits`, daily === undefined
+      ? { token: a.accessToken }
+      : { token: a.accessToken, method: 'PUT', body: { daily: Number(daily) || 0 } });
+  } catch (e) {
+    if (e.status === 401 && !retried && await refreshInferaToken(a)) return inferaLimits(daily, true);
+    if (e.status === 404) throw new Error('Limits are not available on the server yet.');
+    throw e;
+  }
+}
+
 // Access token for other INFERA Agent services (the cloud relay).
 export async function getAccessToken() {
   return (await currentInfera())?.accessToken ?? null;

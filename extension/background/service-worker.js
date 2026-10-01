@@ -13,7 +13,7 @@ import { popupApproval, getApproval, answerApproval } from './approvals.js';
 import { listShortcuts, saveShortcut, deleteShortcut, renderShortcut } from './shortcuts.js';
 import { listTasks, saveTask, deleteTask, rearmAll, markRun, taskIdFromAlarm } from './scheduler.js';
 import { startRecording, stopRecording, addStep, recordingState } from './recording.js';
-import { signOut, authStatus, inferaSignIn, refreshInferaAccount, inferaServer, inferaUsage } from './auth.js';
+import { signOut, authStatus, inferaSignIn, refreshInferaAccount, inferaServer, inferaUsage, inferaLimits } from './auth.js';
 import { spentToday } from './spend.js';
 import { overlay } from './page.js';
 import { executeTool } from './tools/executor.js';
@@ -25,14 +25,37 @@ const sessions = new Map();        // sessionId -> AgentSession
 const windowSession = new Map();   // windowId -> sessionId (side panel's current conversation)
 const panelPorts = new Map();      // windowId -> Set<Port>
 
-function sessionForWindow(windowId, { create = true } = {}) {
+// Which conversation each window's side panel shows. Kept in session storage too:
+// Chrome stops an idle service worker after a short while, and the panel must
+// come back to the same conversation instead of a new one.
+function rememberWindow(windowId, id) {
+  windowSession.set(windowId, id);
+  chrome.storage.session.get('windowSessions').then((r) => {
+    chrome.storage.session.set({ windowSessions: { ...(r.windowSessions || {}), [windowId]: id } });
+  }).catch(() => {});
+}
+
+async function sessionForWindow(windowId, { create = true } = {}) {
   let id = windowSession.get(windowId);
   let s = id && sessions.get(id);
+  if (!s) {
+    const saved = (await chrome.storage.session.get('windowSessions').catch(() => ({}))).windowSessions?.[windowId];
+    if (saved) s = sessions.get(saved);
+    if (!s && saved) {
+      const entry = (await getLocal(STORAGE_KEYS.CONVERSATIONS, [])).find((c) => c.id === saved);
+      if (entry) {
+        s = AgentSession.fromHistory(entry, windowId);
+        wireSession(s);
+        sessions.set(s.id, s);
+      }
+    }
+    if (s) windowSession.set(windowId, s.id);
+  }
   if (!s && create) {
     s = new AgentSession({ kind: 'panel', windowId });
     wireSession(s);
     sessions.set(s.id, s);
-    windowSession.set(windowId, s.id);
+    rememberWindow(windowId, s.id);
   }
   return s;
 }
@@ -42,7 +65,7 @@ function wireSession(s) {
     const next = new AgentSession({ kind: 'panel', windowId: s.windowId, title: `/${shortcut.command}` });
     wireSession(next);
     sessions.set(next.id, next);
-    windowSession.set(s.windowId, next.id);
+    rememberWindow(s.windowId, next.id);
     attachPorts(next);
     broadcast(s.windowId, { type: 'session_switched', session: next.summary() });
     const [tab] = await chrome.tabs.query({ active: true, windowId: s.windowId });
@@ -96,12 +119,12 @@ chrome.runtime.onConnect.addListener((port) => {
         windowId = msg.windowId;
         if (!panelPorts.has(windowId)) panelPorts.set(windowId, new Set());
         panelPorts.get(windowId).add(port);
-        const s = sessionForWindow(windowId);
+        const s = await sessionForWindow(windowId);
         subscribePort(port, s);
         port.postMessage({ type: 'init', ...(await panelState(s)) });
         return;
       }
-      const s = sessionForWindow(windowId);
+      const s = await sessionForWindow(windowId);
       const reply = await handlePanel(msg, s, port);
       if (reply !== undefined) port.postMessage({ type: 'reply', requestId: msg.requestId, data: reply });
     } catch (e) {
@@ -141,9 +164,11 @@ async function costLog(days = 30) {
     .filter((c) => c.cost > 0).map(({ id, title, cost, currency, updatedAt }) => ({ id, title, cost, currency, updatedAt }));
   let server = null;
   let error = null;
+  let limits = null;
   try { server = await inferaUsage(days); } catch (e) { error = e.message; }
+  try { limits = await inferaLimits(); } catch (e) { error = error || e.message; }
   return {
-    server, error, conversations, spentToday: await spentToday(),
+    server, error, limits, conversations, spentToday: await spentToday(),
     settings: { taskBudget: settings.taskBudget, dailyBudget: settings.dailyBudget, webResearch: settings.webResearch !== false, effort: settings.effort, model: settings.model },
   };
 }
@@ -152,6 +177,8 @@ async function handlePanel(msg, s, port) {
   const windowId = s.windowId;
   switch (msg.type) {
     case 'send': {
+      // While a task runs, a new message joins it: the agent reads it at its next step.
+      if (s.status === 'running' || s.status === 'waiting') { s.enqueue(msg.text, msg.attachments || []); return { ok: true, queued: true }; }
       const [tab] = await chrome.tabs.query({ active: true, windowId });
       s.run(msg.text, { attachments: msg.attachments || [], startTabId: tab?.id }).catch((e) => port.postMessage({ type: 'error', message: e.message }));
       return { ok: true };
@@ -165,7 +192,7 @@ async function handlePanel(msg, s, port) {
       const n = new AgentSession({ kind: 'panel', windowId });
       wireSession(n);
       sessions.set(n.id, n);
-      windowSession.set(windowId, n.id);
+      rememberWindow(windowId, n.id);
       subscribePort(port, n);
       return panelState(n);
     }
@@ -178,7 +205,7 @@ async function handlePanel(msg, s, port) {
         wireSession(target);
         sessions.set(target.id, target);
       }
-      windowSession.set(windowId, target.id);
+      rememberWindow(windowId, target.id);
       subscribePort(port, target);
       return panelState(target);
     }
@@ -219,7 +246,9 @@ async function handlePanel(msg, s, port) {
     case 'cost_log': return costLog(msg.days);
     case 'set_budgets': {
       const patch = {};
-      for (const k of ['taskBudget', 'dailyBudget']) if (msg[k] !== undefined) patch[k] = Math.max(0, Number(msg[k]) || 0);
+      if (msg.taskBudget !== undefined) patch.taskBudget = Math.max(0, Number(msg.taskBudget) || 0);
+      // The daily limit lives on the server (shared with the app); this browser keeps no copy.
+      if (msg.dailyBudget !== undefined) await inferaLimits(Math.max(0, Number(msg.dailyBudget) || 0)).catch(() => {});
       for (const k of ['webResearch']) if (msg[k] !== undefined) patch[k] = !!msg[k];
       if (['low', 'medium', 'high', 'xhigh', 'max'].includes(msg.effort)) patch.effort = msg.effort;
       await updateSettings(patch);
@@ -358,4 +387,4 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
 });
 
 // Test/debug hook (used by scripts/e2e.mjs; harmless in production).
-self.__infera = { AgentSession, executeTool, tabGroups, permissions, sessions, nativeBridge, classifyUrl, getSettings, updateSettings };
+self.__infera = { AgentSession, executeTool, tabGroups, permissions, sessions, sessionForWindow, nativeBridge, classifyUrl, getSettings, updateSettings };

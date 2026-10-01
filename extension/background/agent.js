@@ -9,7 +9,7 @@ import { executeTool } from './tools/executor.js';
 import { PANEL_TOOLS, MEMORY_TOOLS, TOOL_BY_NAME } from './tools/definitions.js';
 import { webTools, SERVER_RESULT_TYPES, summarizeServerResult, citedSources } from './tools/web-tools.js';
 import { listMemory, memoryBlock } from './memory.js';
-import { addSpend, spentToday, lastCurrency, money } from './spend.js';
+import { addSpend, lastCurrency, money } from './spend.js';
 
 // Raised to stop a task at the person's budget (not an error).
 class BudgetStop extends Error {}
@@ -50,6 +50,7 @@ export class AgentSession {
     this.modelOverride = null;
     this.modeOverride = null;
     this.files = new Map();      // name -> file the user attached (for file_upload)
+    this.queue = [];             // messages the user sent while a task was running
     this.cost = 0;               // what this conversation has cost, in the account currency
     this.currency = '';
   }
@@ -100,7 +101,26 @@ export class AgentSession {
     if (fn) fn(answer);
   }
 
+  // A message sent while the task runs; it goes into the next step.
+  enqueue(text, attachments = []) {
+    if (!String(text || '').trim() && !attachments.length) return;
+    this.queue.push({ text: String(text || ''), attachments });
+    this.task += `\n\nFollow-up: ${text}`;
+    this.emit({ type: 'queued', count: this.queue.length });
+  }
+
+  #drainQueue() {
+    const items = this.queue.splice(0);
+    const blocks = [];
+    for (const q of items) {
+      blocks.push(...this.#attachmentBlocks(q.attachments));
+      if (q.text) blocks.push({ type: 'text', text: `New message from the user, sent while you were working:\n${q.text}` });
+    }
+    return blocks;
+  }
+
   stop() {
+    this.queue = [];
     this.abort?.abort();
     for (const fn of [...this.pending.values()]) fn('deny');
   }
@@ -170,6 +190,11 @@ export class AgentSession {
       await this.#finishTabs();
       await this.#persist();
       this.emit({ type: 'turn_end', status: this.status });
+      // Messages that arrived too late for this task (Quick Mode, or the last step) start the next one.
+      const late = this.queue.splice(0);
+      if (late.length && this.status === 'done') {
+        setTimeout(() => this.run(late.map((q) => q.text).filter(Boolean).join('\n\n'), { attachments: late.flatMap((q) => q.attachments) }).catch(() => {}), 0);
+      }
       if (this.status === 'done' || this.status === 'error') await this.#notifyDone(settings);
     }
   }
@@ -247,15 +272,10 @@ export class AgentSession {
     this.emit({ type: 'cost', task: this.runCost, conversation: this.cost, call: c.amount, currency: this.currency, balance: c.balance });
   }
 
-  // Before each model call: the daily limit stops the task; the task limit asks
-  // the person whether to continue.
+  // Before each model call: the task limit asks the person whether to continue.
   async #checkBudget(settings) {
     if (!this.currency) this.currency = await lastCurrency();
-    const daily = Number(settings.dailyBudget) || 0;
-    if (daily > 0) {
-      const today = await spentToday();
-      if (today >= daily) throw new BudgetStop(`Today's spending limit (${money(daily, this.currency)}) is reached — ${money(today, this.currency)} spent. Raise it in Costs to continue.`);
-    }
+    // The daily limit is enforced by the INFERA Agent server (shared with the app).
     const step = Number(settings.taskBudget) || 0;
     if (step > 0 && this.budgetLimit > 0 && this.runCost >= this.budgetLimit) {
       const answer = await this.requestApproval({
@@ -419,7 +439,11 @@ export class AgentSession {
       if (msg.stop_reason === 'pause_turn') continue;
 
       const uses = msg.content.filter((b) => b.type === 'tool_use');
-      if (!uses.length) return; // end_turn / max_tokens without tools
+      if (!uses.length) {
+        // The user wrote while this step was running: answer that too.
+        if (this.queue.length) { this.messages.push({ role: 'user', content: this.#drainQueue() }); continue; }
+        return; // end_turn / max_tokens without tools
+      }
 
       const results = [];
       let browserFailed = false; // browser actions run in order and stop at the first failure
@@ -454,6 +478,7 @@ export class AgentSession {
       // New site know-how is appended after the results (never edits the system prompt).
       const note = this.#contextNote(mode, await tabGroups.tabs(this.id).catch(() => []));
       if (note) results.push({ type: 'text', text: note });
+      if (this.queue.length) results.push(...this.#drainQueue());
       // All results in ONE user message.
       this.messages.push({ role: 'user', content: results });
       if (this.abort.signal.aborted) throw new DOMException('aborted', 'AbortError');

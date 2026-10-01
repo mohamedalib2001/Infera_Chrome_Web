@@ -134,7 +134,7 @@ function fillSelectors() {
 
 function setStatus(s) {
   const running = s === 'running' || s === 'waiting';
-  $('#btnSend').hidden = running;
+  // Messages can be sent while a task runs (they join it); Stop sits next to Send.
   $('#btnStop').hidden = !running;
   const st = $('#status');
   st.className = 'status' + (running ? ' running' : '');
@@ -424,7 +424,7 @@ input.addEventListener('keydown', (e) => {
     if ((e.key === 'Enter' || e.key === 'Tab') && items.length) { e.preventDefault(); (items[idx] || items[0]).click(); return; }
     if (e.key === 'Escape') { hideSlash(); return; }
   }
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if ($('#btnSend').hidden) return; send(); }
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
 });
 input.addEventListener('paste', async (e) => {
   for (const item of e.clipboardData?.items || []) {
@@ -590,18 +590,20 @@ function renderCosts(d) {
   // Limits and cost settings
   const s = d.settings;
   const taskIn = el('input', { type: 'number', min: '0', step: '0.5', value: s.taskBudget ?? 0 });
-  const dayIn = el('input', { type: 'number', min: '0', step: '1', value: s.dailyBudget ?? 0 });
+  const lim = d.limits;
+  const dayIn = el('input', { type: 'number', min: '0', step: '0.5', value: lim?.daily ?? 0, disabled: lim ? undefined : true });
   const effortSel = el('select', {}, ...['low', 'medium', 'high', 'xhigh'].map((e) => el('option', { value: e, selected: s.effort === e ? true : undefined }, t(`effort_${e}`))));
   const webChk = el('input', { type: 'checkbox', checked: s.webResearch ? true : undefined });
   const saved = el('span', { class: 'muted small' });
   parts.push(el('div', { class: 'card form' },
     el('b', {}, t('limits')),
     el('label', {}, `${t('taskLimit')} (${cur})`, taskIn), el('p', { class: 'muted small' }, t('taskLimitHint')),
-    el('label', {}, `${t('dailyLimit')} (${cur})`, dayIn), el('p', { class: 'muted small' }, t('dailyLimitHint')),
+    el('label', {}, `${t('dailyLimit')} (${lim?.currency || cur})`, dayIn),
+    el('p', { class: 'muted small' }, `${t(lim?.owner ? 'dailyLimitOwnerHint' : 'dailyLimitHint')}${lim ? ` ${t('spentToday')}: ${money(lim.spentToday, lim.currency)}.` : ''}`),
     el('label', {}, t('effortLabel'), effortSel), el('p', { class: 'muted small' }, t('effortHint')),
     el('div', { class: 'check-row' }, webChk, el('span', {}, t('webResearchLabel'))),
     el('div', { class: 'row' }, el('button', { class: 'btn primary small', onclick: async () => {
-      const nd = await call('set_budgets', { taskBudget: taskIn.value, dailyBudget: dayIn.value, effort: effortSel.value, webResearch: webChk.checked, days: 30 });
+      const nd = await call('set_budgets', { taskBudget: taskIn.value, ...(lim ? { dailyBudget: dayIn.value } : {}), effort: effortSel.value, webResearch: webChk.checked, days: 30 });
       renderCosts(nd);
     } }, t('save')), saved)));
 

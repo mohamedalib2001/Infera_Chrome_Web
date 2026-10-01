@@ -146,10 +146,21 @@ If an endpoint rejects the toolset, the session falls back to the classic tools 
   task. The side panel shows the open conversation's cost next to the status.
 * **Limits** (`spend.js`, `agent.js`): `taskBudget` (default 3 in the account currency) — when a task
   reaches it the agent asks "Continue / Stop here" (approval type `BUDGET`) and continues in steps of the
-  same amount; `dailyBudget` (default off) stops tasks once today's spending in this browser reaches it.
+  same amount. The **daily limit is stored on the server** (`GET/PUT /api/browser-agent/limits`) and
+  enforced by the gateway: for the owner it is the Owner dashboard's browser-agent ceiling (USD), for a
+  member their own limit in the account currency — the same value in the app and every browser.
 * **Costs tab** (side panel): balance, today and this month (from `GET /api/browser-agent/usage`, all
   devices), the share of history served from the cache, the limits and cost settings, spending by task,
   and the operations log (time, model, tokens in → out, amount; searches separately).
+
+## Session continuity
+
+* The side panel's open conversation per window is remembered in `chrome.storage.session`, so when
+  Chrome stops the idle service worker the panel comes back to the same conversation (restored from
+  history) instead of a new one.
+* Messages sent while a task runs are queued (`AgentSession.enqueue`) and added to the next step as
+  "New message from the user, sent while you were working"; if the task has just finished they start
+  the next task.
 
 Preserved thinking (Opus 5.5 / Fable 5.1): the system prompt and tool list are fixed for a
 conversation (later mode changes and site know-how are appended as `<system-reminder>` notes, never
