@@ -13,7 +13,7 @@ import { popupApproval, getApproval, answerApproval } from './approvals.js';
 import { listShortcuts, saveShortcut, deleteShortcut, renderShortcut } from './shortcuts.js';
 import { listTasks, saveTask, deleteTask, rearmAll, markRun, taskIdFromAlarm } from './scheduler.js';
 import { startRecording, stopRecording, addStep, recordingState } from './recording.js';
-import { signOut, authStatus, inferaSignIn, refreshInferaAccount, inferaServer, inferaUsage, inferaLimits } from './auth.js';
+import { signOut, authStatus, inferaSignIn, refreshInferaAccount, inferaServer, inferaUsage, inferaLimits, inferaConversations } from './auth.js';
 import { spentToday } from './spend.js';
 import { overlay } from './page.js';
 import { executeTool } from './tools/executor.js';
@@ -199,7 +199,9 @@ async function handlePanel(msg, s, port) {
     case 'load_conversation': {
       let target = sessions.get(msg.id);
       if (!target) {
-        const entry = (await getLocal(STORAGE_KEYS.CONVERSATIONS, [])).find((c) => c.id === msg.id);
+        let entry = (await getLocal(STORAGE_KEYS.CONVERSATIONS, [])).find((c) => c.id === msg.id);
+        // Saved in the account from another device (or cleared from this browser).
+        if (!entry) entry = await inferaConversations('get', msg.id).catch(() => null);
         if (!entry) throw new Error('Conversation not found');
         target = AgentSession.fromHistory(entry, windowId);
         wireSession(target);
@@ -213,6 +215,7 @@ async function handlePanel(msg, s, port) {
       const all = await getLocal(STORAGE_KEYS.CONVERSATIONS, []);
       await setLocal(STORAGE_KEYS.CONVERSATIONS, all.filter((c) => c.id !== msg.id));
       if (msg.id !== s.id) sessions.delete(msg.id);
+      await inferaConversations('delete', msg.id).catch(() => {});
       return panelState(s);
     }
     case 'set_model': s.modelOverride = msg.model; await updateSettings({ model: msg.model }); return { ok: true };
@@ -244,6 +247,14 @@ async function handlePanel(msg, s, port) {
     case 'refresh_account': await refreshInferaAccount(); return panelState(s);
     case 'state': return panelState(s);
     case 'cost_log': return costLog(msg.days);
+    case 'history_list': {
+      // This browser's conversations plus those saved in the account from other devices.
+      const local = (await getLocal(STORAGE_KEYS.CONVERSATIONS, [])).map(({ id, title, updatedAt, status, kind, cost, currency }) => ({ id, title, updatedAt, status, kind, cost, currency }));
+      const remote = (await getSettings()).syncHistory === false ? [] : await inferaConversations('list').catch(() => []);
+      const byId = new Map(local.map((c) => [c.id, c]));
+      for (const r of remote || []) if (!byId.has(r.id)) byId.set(r.id, { ...r, kind: 'panel', remote: true });
+      return [...byId.values()].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    }
     case 'set_budgets': {
       const patch = {};
       if (msg.taskBudget !== undefined) patch.taskBudget = Math.max(0, Number(msg.taskBudget) || 0);
@@ -387,4 +398,8 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
 });
 
 // Test/debug hook (used by scripts/e2e.mjs; harmless in production).
-self.__infera = { AgentSession, executeTool, tabGroups, permissions, sessions, sessionForWindow, nativeBridge, classifyUrl, getSettings, updateSettings };
+self.__infera = {
+  AgentSession, executeTool, tabGroups, permissions, sessions, sessionForWindow, nativeBridge, classifyUrl, getSettings, updateSettings,
+  // A side-panel message without a panel (tests).
+  panelCall: async (windowId, msg) => handlePanel(msg, await sessionForWindow(windowId), { postMessage() {} }),
+};

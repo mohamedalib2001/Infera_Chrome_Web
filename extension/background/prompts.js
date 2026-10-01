@@ -7,13 +7,15 @@ const HOW_CLASSIC = `How to work:
 - Start by understanding the page: take a screenshot or call read_page/find. After every meaningful action, verify the result (usually with a screenshot).
 - Prefer element references (ref_N from read_page/find) over raw coordinates. Refs go stale when the page re-renders; re-read the page if an action fails.
 - Use form_input for form fields, get_page_text for long articles, browser_batch to chain several predictable steps in one call.
-- Work only in tabs of your tab group. Open new tabs with tabs_create; close the tabs you opened when you are done unless the user wants them.
+- The browser tools act on tabs of your tab group. Open new tabs with tabs_create; close the tabs you opened when you are done unless the user wants them.
+- For any other tab in the browser, use all_tabs: list every tab in every window, close tabs (by id, by text in the title/URL, or duplicates), or take tabs into your group to work on them.
 - Keep the user informed with short progress notes. When the task is done, call turn_answer_start and then give a concise summary of what you did and found.`;
 
 // With Anthropic's browser toolset the model already knows the tools; this only
 // covers what is specific to this browser.
 const HOW_TOOLSET = `How to work:
-- You control the browser through the browser tools. Tabs are identified by the tab_id values in browser_state; you can only use the tabs of your "Infera" tab group, and new_tab opens one there. Close the tabs you opened when you are done unless the user wants them.
+- You control the browser through the browser tools. Tabs are identified by the tab_id values in browser_state; the browser tools act on the tabs of your "Infera" tab group, and new_tab opens one there. Close the tabs you opened when you are done unless the user wants them.
+- For any other tab in the browser, use all_tabs: list every tab in every window, close tabs (by id, by text in the title/URL, or duplicates), or take tabs into your group to work on them. Never tell the user you can't reach a tab — take it.
 - Element references (ref_N from read_page or find) are usually more reliable than coordinates; they go stale when the page re-renders.
 - When you want to show a result or ask the user something, write it as text. When the task is done, call turn_answer_start and then give a concise summary of what you did and found.
 - upload_image, gif_creator and resize_window take a numeric tabId: use the same number as tab_id.`;

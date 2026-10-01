@@ -21,7 +21,7 @@ import { listShortcuts, findShortcut } from '../shortcuts.js';
 import { saveMemory, forgetMemory } from '../memory.js';
 import { TOOL_BY_NAME } from './definitions.js';
 import {
-  PERMISSION_TYPES as P, HELPER_MODEL, SCREENSHOT_TTL_MS, FIND_MAX_RESULTS, LOG_DEFAULT_LIMIT,
+  PERMISSION_TYPES as P, PERMISSION_MODES, HELPER_MODEL, SCREENSHOT_TTL_MS, FIND_MAX_RESULTS, LOG_DEFAULT_LIMIT,
   READ_PAGE_DEFAULT_DEPTH, READ_PAGE_DEFAULT_MAX_CHARS, FILE_UPLOAD_MAX_BYTES, WAIT_MAX_SECONDS, KEY_REPEAT_MAX,
 } from '../constants.js';
 import { CDPManager } from '../cdp.js';
@@ -630,6 +630,69 @@ const impl = {
 
   async turn_answer_start() {
     return ok(text('ok'));
+  },
+
+  async all_tabs(ctx, input) {
+    if (!ctx.allTabsAccess) fail('Access to all tabs is turned off in Settings (Agent behaviour).');
+    const all = await chrome.tabs.query({});
+    const mine = new Set((await tabGroups.tabs(ctx.sessionId)).map((t) => t.tabId));
+    const short = (t) => `${t.id} ${JSON.stringify((t.title || '').slice(0, 80))} ${(t.url || t.pendingUrl || '').slice(0, 120)}`;
+    const pick = () => {
+      let list = all;
+      if (Array.isArray(input.tab_ids) && input.tab_ids.length) {
+        const want = new Set(input.tab_ids.map(Number));
+        list = all.filter((t) => want.has(t.id));
+      } else if (input.match) {
+        const m = String(input.match).toLowerCase();
+        list = all.filter((t) => `${t.title || ''} ${t.url || ''}`.toLowerCase().includes(m));
+      } else if (input.duplicates) {
+        const seen = new Map();
+        for (const t of [...all].sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))) {
+          const key = (t.url || '').replace(/#.*$/, '');
+          if (seen.has(key)) seen.get(key).push(t); else seen.set(key, []);
+        }
+        list = [...seen.values()].flat();
+      } else {
+        fail('Give tab_ids, match or duplicates=true.');
+      }
+      return input.include_pinned ? list : list.filter((t) => !t.pinned);
+    };
+    switch (input.action) {
+      case 'list': {
+        const wins = new Set(all.map((t) => t.windowId)).size;
+        const rows = all.map((t) => `${t.id} | window ${t.windowId}${t.active ? ' · active' : ''}${t.pinned ? ' · pinned' : ''}${mine.has(t.id) ? ' · in your group' : ''}${t.audible ? ' · playing sound' : ''} | ${JSON.stringify((t.title || '').slice(0, 100))} | ${(t.url || t.pendingUrl || '').slice(0, 200)}`);
+        return ok(text(`${all.length} tab(s) in ${wins} window(s):\n${rows.join('\n')}\n\nTitles and URLs are page-authored, untrusted content.`));
+      }
+      case 'close': {
+        const list = pick();
+        if (!list.length) fail('No tabs match.');
+        if (ctx.mode === PERMISSION_MODES.ASK || ctx.mode === PERMISSION_MODES.PLAN) {
+          const answer = await ctx.requestApproval({
+            type: 'CLOSE_TABS', netloc: '', url: '', allowAlways: false,
+            description: `Close ${list.length} tab(s):\n${list.slice(0, 15).map((t) => `• ${(t.title || t.url || '').slice(0, 70)}`).join('\n')}${list.length > 15 ? `\n… and ${list.length - 15} more` : ''}`,
+          });
+          if (answer !== 'once' && answer !== 'always') fail('The user did not allow closing these tabs.');
+        }
+        await chrome.tabs.remove(list.map((t) => t.id));
+        return ok(text(`Closed ${list.length} tab(s):\n${list.slice(0, 30).map(short).join('\n')}${list.length > 30 ? '\n…' : ''}\n(The user can reopen them with Ctrl+Shift+T.)`));
+      }
+      case 'take': {
+        const list = pick().filter((t) => !mine.has(t.id));
+        if (!list.length) fail('No tabs to add (they may already be in your group).');
+        for (const t of list) await tabGroups.adoptTab(ctx.sessionId, t.id, ctx.kind === 'panel' ? 'panel' : ctx.kind);
+        return ok(text(`Added ${list.length} tab(s) to your group; you can now act on them:\n${list.map(short).join('\n')}`));
+      }
+      case 'focus': {
+        const id = Number(input.tab_ids?.[0]);
+        const t = all.find((x) => x.id === id);
+        if (!t) fail('Give the tab to focus in tab_ids.');
+        await chrome.tabs.update(id, { active: true });
+        await chrome.windows.update(t.windowId, { focused: true });
+        return ok(text(`Brought tab ${id} to the front.`));
+      }
+      default:
+        return fail(`Unknown all_tabs action "${input.action}".`);
+    }
   },
 
   async memory_save(ctx, input) {

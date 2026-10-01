@@ -85,7 +85,7 @@ Works in Arabic and English, with light and dark themes.
 
 **Remote code:** No, I am not using remote code. (All scripts are packaged in the extension.)
 
-**Data usage — collected:** Personally identifiable information (name, email of the INFERA Agent account), Authentication information (sign-in token), Personal communications (the user's prompts), Location — no, Web history (URLs/titles of tabs in the agent's group), User activity (actions performed by the agent), Website content (page text and screenshots needed for the task).
+**Data usage — collected:** Personally identifiable information (name, email of the INFERA Agent account), Authentication information (sign-in token), Personal communications (the user's prompts and the agent's replies, saved in the user's account), Web history (URLs/titles of tabs the agent works on or lists when asked), User activity (actions performed by the agent), Website content (page text and screenshots needed for the task; screenshots are not stored). Location — no.
 
 Certify all three: not sold to third parties; not used for unrelated purposes; not used for creditworthiness or lending.
 

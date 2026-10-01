@@ -248,7 +248,7 @@ const TOOL_ICON = {
   new_tab: '+', list_tabs: '▭', switch_tab: '▭', close_tab: '×',
   // Server tools and memory
   web_search: '🔎', web_fetch: '↓', code_execution: '⚙', bash_code_execution: '⚙', text_editor_code_execution: '⚙',
-  memory_save: '★', memory_forget: '☆',
+  memory_save: '★', memory_forget: '☆', all_tabs: '▦',
 };
 
 function targetText(tg) {
@@ -287,6 +287,7 @@ function toolSummary(name, i = {}) {
     case 'web_fetch': return String(i.url || '');
     case 'memory_save': return `“${String(i.text || '').slice(0, 60)}”`;
     case 'memory_forget': return String(i.id || '');
+    case 'all_tabs': return `${i.action}${i.match ? ` “${i.match}”` : i.duplicates ? ' duplicates' : i.tab_ids?.length ? ` ${i.tab_ids.length} tab(s)` : ''}`;
     default: return '';
   }
 }
@@ -541,13 +542,14 @@ const fmt = (ts) => (ts ? new Date(ts).toLocaleString(currentLang() === 'ar' ? '
 
 // History
 $('#btnHistory').addEventListener('click', async () => {
-  await refreshConversations();
-  const list = state.conversations || [];
+  openDrawer(t('history'), el('p', { class: 'muted' }, '…'));
+  let list = [];
+  try { list = await call('history_list'); } catch { await refreshConversations(); list = state.conversations || []; }
   if (!list.length) return openDrawer(t('history'), el('p', { class: 'muted' }, t('noHistory')));
   openDrawer(t('history'), list.map((c) => el('div', { class: 'card item click', onclick: async () => { closeDrawer(); loadState(await call('load_conversation', { id: c.id })); } },
     el('div', { class: 'row' }, el('div', { class: 't grow' }, c.kind === 'scheduled' ? `⏰ ${c.title}` : c.title),
       el('button', { class: 'icon-btn', 'aria-label': t('delete'), onclick: async (e) => { e.stopPropagation(); loadState(await call('delete_conversation', { id: c.id })); $('#btnHistory').click(); } }, '×')),
-    el('div', { class: 's' }, `${fmt(c.updatedAt)} · ${t(c.status) || c.status}`))));
+    el('div', { class: 's' }, `${fmt(c.updatedAt)} · ${t(c.status) || c.status || ''}${c.cost > 0 ? ` · ${money(c.cost, c.currency)}` : ''}${c.remote ? ` · ${t('fromAccount')}` : ''}`))));
 });
 
 // ---------------- costs ----------------

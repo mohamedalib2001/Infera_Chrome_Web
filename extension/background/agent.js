@@ -6,9 +6,10 @@
 //               language, we execute the batch, then send a fresh screenshot.
 import { streamMessage, modelInfo } from './llm.js';
 import { executeTool } from './tools/executor.js';
-import { PANEL_TOOLS, MEMORY_TOOLS, TOOL_BY_NAME } from './tools/definitions.js';
+import { PANEL_TOOLS, MEMORY_TOOLS, ALL_TABS_TOOLS, TOOL_BY_NAME } from './tools/definitions.js';
 import { webTools, SERVER_RESULT_TYPES, summarizeServerResult, citedSources } from './tools/web-tools.js';
 import { listMemory, memoryBlock } from './memory.js';
+import { inferaConversations } from './auth.js';
 import { addSpend, lastCurrency, money } from './spend.js';
 
 // Raised to stop a task at the person's budget (not an error).
@@ -135,6 +136,7 @@ export class AgentSession {
     this.task = this.task ? `${this.task}\n\nFollow-up: ${userText}` : userText;
     if (!this.title) this.title = userText.slice(0, 80);
     const model = this.modelOverride || settings.model;
+    this.lastModel = model;
     const mode = this.modeOverride || settings.permissionMode;
     this.runCost = 0;
     this.budgetLimit = Number(settings.taskBudget) || 0;
@@ -372,6 +374,7 @@ export class AgentSession {
       runShortcut: this.runShortcut,
       attachments: this.files,
       memoryEnabled: settings.memory !== false,
+      allTabsAccess: settings.allTabsAccess !== false,
     };
   }
 
@@ -382,7 +385,7 @@ export class AgentSession {
     const remoteByName = new Map(remote.map((t) => [t.name, t]));
     const remoteDefs = remote.map(({ _server, _tool, ...t }) => t); // eslint-disable-line no-unused-vars
     const useWeb = () => !!modelInfo(model).browser && settings.webResearch !== false && !this.noWebTools;
-    const extras = () => [...(settings.memory !== false ? MEMORY_TOOLS : []), ...remoteDefs];
+    const extras = () => [...(settings.allTabsAccess !== false ? ALL_TABS_TOOLS : []), ...(settings.memory !== false ? MEMORY_TOOLS : []), ...remoteDefs];
     const toolList = (ts) => [
       ...(ts ? [BROWSER_TOOLSET] : []),
       ...(useWeb() ? webTools(settings, policy) : []),
@@ -589,6 +592,12 @@ export class AgentSession {
     const entry = { id: this.id, title: this.title, kind: this.kind, createdAt: this.createdAt, updatedAt: Date.now(), status: this.status, messages: stripped, usage: this.usage, cost: this.cost, currency: this.currency };
     const next = [entry, ...all.filter((c) => c.id !== this.id)].slice(0, HISTORY_LIMIT);
     await setLocal(STORAGE_KEYS.CONVERSATIONS, next);
+    // And in the person's INFERA Agent account, so the history follows them to every device.
+    const settings = await getSettings();
+    if (settings.syncHistory !== false) {
+      inferaConversations('put', this.id, { ...entry, model: this.lastModel || '', messages: capText(stripped) })
+        .catch((e) => console.warn('Infera: conversation not saved to the account:', e.message));
+    }
   }
 
   static fromHistory(entry, windowId) {
@@ -597,11 +606,22 @@ export class AgentSession {
     s.createdAt = entry.createdAt;
     s.usage = entry.usage || s.usage;
     s.cost = entry.cost || 0;
+    s.lastModel = entry.model || '';
     s.currency = entry.currency || '';
     s.task = entry.title;
     s.status = 'idle';
     return s;
   }
+}
+
+// Very long page texts are shortened in the account copy (the steps stay complete).
+function capText(messages) {
+  const cap = (b) => {
+    if (b?.type === 'text' && b.text?.length > 20_000) return { ...b, text: `${b.text.slice(0, 20_000)}\n[… shortened]` };
+    if (b?.type === 'tool_result' && Array.isArray(b.content)) return { ...b, content: b.content.map(cap) };
+    return b;
+  };
+  return messages.map((m) => (Array.isArray(m.content) ? { ...m, content: m.content.map(cap) } : m));
 }
 
 function errorResult(u, reason) {

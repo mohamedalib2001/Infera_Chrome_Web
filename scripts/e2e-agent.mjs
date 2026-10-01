@@ -27,6 +27,20 @@ const start = (id) => ({ type: 'message_start', message: { id, model: 'claude-op
 let phase = 'normal';
 const mcpCalls = [];
 const server = http.createServer((req, res) => {
+  if (req.url.startsWith('/api/browser-agent/conversations')) {
+    const convs = (globalThis.CONVS ||= new Map());
+    const id = decodeURIComponent(req.url.split('/')[4] || '');
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      if (req.method === 'PUT') { convs.set(id, JSON.parse(body)); return res.end('{"ok":true}'); }
+      if (req.method === 'DELETE') { convs.delete(id); return res.end('{"ok":true}'); }
+      if (id) return res.end(JSON.stringify(convs.get(id) || null));
+      res.end(JSON.stringify([...convs.values()].map(({ id: cid, title, status, cost, currency, updatedAt }) => ({ id: cid, title, status, cost, currency, updatedAt }))));
+    });
+    return;
+  }
   if (req.url.startsWith('/api/browser-agent/limits')) {
     let body = '';
     req.on('data', (c) => { body += c; });
@@ -268,8 +282,8 @@ check('old tool results cleared rarely and in big steps', cm?.trigger?.value ===
 check('task named for the cost log', decodeURIComponent(requests[0].headers['x-infera-task'] || '') === 'What is on this page?');
 const t0 = requests[0].body.tools;
 check('tools: web search/fetch first, own tools w/ eager streaming, memory, cache_control',
-  t0.length === 27 && t0[0].type === 'web_search_20260318' && t0[0].response_inclusion === 'excluded' && t0[1].type === 'web_fetch_20260318'
-  && !t0[0].eager_input_streaming && t0[2].eager_input_streaming === true && t0.some((t) => t.name === 'memory_save') && !!t0.at(-1).cache_control,
+  t0.length === 28 && t0[0].type === 'web_search_20260318' && t0[0].response_inclusion === 'excluded' && t0[1].type === 'web_fetch_20260318'
+  && !t0[0].eager_input_streaming && t0[2].eager_input_streaming === true && t0.some((t) => t.name === 'memory_save') && t0.some((t) => t.name === 'all_tabs') && !!t0.at(-1).cache_control,
   t0.map((t) => t.name || t.type).join(','));
 check('tab context in first user msg', JSON.stringify(requests[0].body.messages[0]).includes('<tab_context>'));
 const asst = req2.messages[1];
@@ -362,6 +376,37 @@ await run('claude-opus-5-5', { classic: false });
 check('memory: shown at the start of a new conversation', JSON.stringify(requests[0].body.messages[0]).includes('<user_memory>') && JSON.stringify(requests[0].body.messages[0]).includes('Prefers aisle seats'));
 await sw.evaluate(() => self.__infera.updateSettings({ userBlocklist: [] }));
 phase = 'normal';
+
+// Conversations are saved in the account and come back on another device.
+await new Promise((r) => setTimeout(r, 300));
+const saved = [...(globalThis.CONVS || new Map()).values()];
+check('history: conversations saved in the account, without screenshots', saved.length >= 3 && saved.every((c) => !JSON.stringify(c.messages).includes('"type":"image"')) && saved.some((c) => c.model === 'claude-opus-5-5'), String(saved.length));
+globalThis.CONVS.set('remote-conv-1', { id: 'remote-conv-1', title: 'From my other laptop', status: 'done', kind: 'panel', createdAt: Date.now(), updatedAt: Date.now() + 1000, cost: 0.5, currency: 'SAR', messages: [{ role: 'user', content: [{ type: 'text', text: 'hello from the laptop' }] }, { role: 'assistant', content: [{ type: 'text', text: 'hi' }] }] });
+const remoteHist = await sw.evaluate(async () => {
+  const win = (await chrome.windows.getCurrent()).id;
+  const list = await self.__infera.panelCall(win, { type: 'history_list' });
+  const loaded = await self.__infera.panelCall(win, { type: 'load_conversation', id: 'remote-conv-1' });
+  return { first: list[0], text: loaded?.messages?.[0]?.content?.[0]?.text };
+});
+check('history: a conversation from another device is listed and opens', remoteHist.first?.id === 'remote-conv-1' && remoteHist.first.remote && remoteHist.text === 'hello from the laptop', JSON.stringify(remoteHist));
+
+// The whole browser: list, take and close any tab (not only the agent's group).
+const tabsRes = await sw.evaluate(async ({ base }) => {
+  const I = self.__infera;
+  const extra = [await chrome.tabs.create({ url: `${base}/test.html?dup`, active: false }), await chrome.tabs.create({ url: `${base}/test.html?dup`, active: false }), await chrome.tabs.create({ url: `${base}/test.html?other`, active: false })];
+  await new Promise((r) => setTimeout(r, 500));
+  const s = new I.AgentSession({ kind: 'panel' });
+  const ctx = { sessionId: s.id, kind: 'panel', mode: 'auto', allTabsAccess: true, requestApproval: async () => 'once', signal: new AbortController().signal, toolUseId: 'x' };
+  const list = await I.executeTool('all_tabs', { action: 'list' }, ctx);
+  const take = await I.executeTool('all_tabs', { action: 'take', tab_ids: [extra[2].id] }, ctx);
+  const inGroup = await I.tabGroups.isInGroup(s.id, extra[2].id);
+  const dup = await I.executeTool('all_tabs', { action: 'close', duplicates: true }, ctx);
+  const left = (await chrome.tabs.query({})).filter((t) => t.url.includes('?dup')).length;
+  const off = await I.executeTool('all_tabs', { action: 'list' }, { ...ctx, allTabsAccess: false });
+  await I.executeTool('all_tabs', { action: 'close', match: '?other' }, ctx);
+  return { list: list.content[0].text, inGroup, dup: dup.content[0].text, left, off: off.isError, otherGone: !(await chrome.tabs.query({})).some((t) => t.url.includes('?other')) };
+}, { base });
+check('all tabs: lists every tab, takes one into the group, closes duplicates and by match', /tab\(s\) in \d+ window/.test(tabsRes.list) && tabsRes.list.includes('?dup') && tabsRes.inGroup && tabsRes.left === 1 && tabsRes.otherGone && tabsRes.off, JSON.stringify({ ...tabsRes, list: tabsRes.list.slice(0, 120) }));
 
 // A message sent while a task runs joins it at the next step.
 requests.length = 0;

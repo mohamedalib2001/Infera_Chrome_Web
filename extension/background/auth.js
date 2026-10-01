@@ -213,6 +213,22 @@ export async function inferaLimits(daily, retried = false) {
   }
 }
 
+// Conversations kept in the person's INFERA Agent account (history on every device).
+// method: 'list' | 'get' | 'put' | 'delete'.
+export async function inferaConversations(method, id, entry, retried = false) {
+  const a = await currentInfera();
+  if (!a) throw new Error('Not signed in.');
+  const url = `${a.server}/api/browser-agent/conversations${id ? `/${encodeURIComponent(id)}` : ''}`;
+  try {
+    if (method === 'put') return await inferaFetch(url, { token: a.accessToken, method: 'PUT', body: entry });
+    if (method === 'delete') return await inferaFetch(url, { token: a.accessToken, method: 'DELETE' });
+    return await inferaFetch(url, { token: a.accessToken });
+  } catch (e) {
+    if (e.status === 401 && !retried && await refreshInferaToken(a)) return inferaConversations(method, id, entry, true);
+    throw e;
+  }
+}
+
 // Access token for other INFERA Agent services (the cloud relay).
 export async function getAccessToken() {
   return (await currentInfera())?.accessToken ?? null;
