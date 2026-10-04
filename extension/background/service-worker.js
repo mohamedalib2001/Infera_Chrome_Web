@@ -19,6 +19,7 @@ import { overlay } from './page.js';
 import { executeTool } from './tools/executor.js';
 import { listMemory, forgetMemory, clearMemory } from './memory.js';
 import { listServers, saveServer, deleteServer } from './remote-mcp.js';
+import { markInterrupted } from './progress.js';
 
 // ---------------- session registry ----------------
 const sessions = new Map();        // sessionId -> AgentSession
@@ -99,6 +100,8 @@ chrome.runtime.onInstalled.addListener(async (d) => {
   if (d.reason === 'install' && !(await inferaServer())) chrome.runtime.openOptionsPage();
 });
 chrome.runtime.onStartup.addListener(() => rearmAll());
+// The worker (or the browser) stopped while a task ran: that task is kept, marked as cut off, never shown as running.
+markInterrupted().catch(() => {});
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 nativeBridge.connect();
@@ -399,7 +402,7 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
 
 // Test/debug hook (used by scripts/e2e.mjs; harmless in production).
 self.__infera = {
-  AgentSession, executeTool, tabGroups, permissions, sessions, sessionForWindow, nativeBridge, classifyUrl, getSettings, updateSettings,
+  AgentSession, executeTool, tabGroups, permissions, sessions, sessionForWindow, nativeBridge, classifyUrl, getSettings, updateSettings, markInterrupted,
   // A side-panel message without a panel (tests).
   panelCall: async (windowId, msg) => handlePanel(msg, await sessionForWindow(windowId), { postMessage() {} }),
 };

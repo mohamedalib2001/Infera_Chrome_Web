@@ -1,0 +1,38 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Account settings</title>
+<style>
+  body { margin: 0; font-family: sans-serif; }
+  .b { position: fixed; left: 20px; width: 220px; height: 48px; font-size: 16px; }
+  #toast { position: fixed; left: 260px; top: 20px; }
+</style></head>
+<body>
+  <button class="b" id="locked" style="top:20px" disabled>Export (locked)</button>
+  <button class="b" id="save" style="top:90px">Save changes</button>
+  <form id="f" novalidate>
+    <input id="email" name="email" aria-label="Email" style="position:fixed;left:260px;top:160px">
+    <button class="b" id="submit" style="top:160px" type="submit">Send</button>
+  </form>
+  <button class="b" id="open" style="top:230px">Delete project</button>
+  <a class="b" id="go" style="top:300px;display:block;background:#eee" href="/hard.html?step=2">Next step</a>
+  <div id="toast" role="status"></div>
+  <p id="err" role="alert"></p>
+  <script>
+    // A save that answers late (a slow request), like most real apps.
+    document.getElementById('save').onclick = () => setTimeout(() => { document.getElementById('toast').textContent = 'Saved successfully'; }, 700);
+    // A form that refuses an empty email the way real sites do (aria-invalid + an alert).
+    document.getElementById('f').onsubmit = (e) => {
+      e.preventDefault();
+      const email = document.getElementById('email');
+      if (!email.value) { email.setAttribute('aria-invalid', 'true'); document.getElementById('err').textContent = 'Email is required'; }
+    };
+    // A confirmation dialog that appears on top of the page.
+    document.getElementById('open').onclick = () => {
+      const d = document.createElement('div');
+      d.setAttribute('role', 'dialog'); d.setAttribute('aria-label', 'Confirm delete');
+      d.style.cssText = 'position:fixed;left:30px;top:400px;width:300px;height:120px;background:#fff;border:1px solid #000';
+      d.innerHTML = '<h2>Delete this project?</h2><button>Delete</button>';
+      document.body.appendChild(d);
+    };
+    if (location.search.includes('step=2')) document.title = 'Step 2 — Billing';
+  </script>
+</body></html>

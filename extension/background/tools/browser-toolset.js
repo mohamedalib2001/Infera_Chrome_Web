@@ -8,6 +8,7 @@
 // tool_result: { type:'tool_result', tool_use_id, toolset_name:'browser', content:[text|image|browser_state], is_error? }
 import { executeTool } from './executor.js';
 import { tabGroups } from '../tab-groups.js';
+import { armEffects, readEffects, describeEffects } from '../effects.js';
 
 export const TOOLSET_NAME = 'browser';
 
@@ -145,6 +146,13 @@ async function tabMember(name, i, ctx) {
   }
 }
 
+// Clicks, submitting keys, drags and uploads are expected to change the page; typing into a field or reading is not.
+const WATCHED = new Set(['left_click', 'double_click', 'triple_click', 'middle_click', 'left_click_drag', 'file_upload', 'left_mouse_up']);
+export function observes(name, input = {}) {
+  if (WATCHED.has(name)) return true;
+  return name === 'key' && /enter|return|escape|esc|tab|space|arrow|page|home|end|delete|backspace|f\d+|\+/i.test(String(input.text || ''));
+}
+
 // Runs one member call. Returns { content, isError } in executor form.
 export async function executeMember(u, ctx) {
   const i = u.input || {};
@@ -153,9 +161,12 @@ export async function executeMember(u, ctx) {
     const tabId = await tabFor(ctx.sessionId, i.tab_id);
     const call = mapMember(u.name, i, tabId);
     if (!call) return { content: [text(`The browser action "${u.name}" is not available in INFERA Agent.`)], isError: true };
+    // Actions that should change something are watched, and what really happened is reported with the result.
+    const watch = observes(u.name, i) && await armEffects(tabId);
     const r = await executeTool(call[0], call[1], ctx, { internal: true });
     if (r.isError) return r;
-    return { content: [...r.content, await browserState(ctx.sessionId)] };
+    const effect = watch ? describeEffects(await readEffects(tabId)) : '';
+    return { content: [...r.content, ...(effect ? [text(effect)] : []), await browserState(ctx.sessionId)], ...(effect ? { effect } : {}) };
   } catch (e) {
     return { content: [text(e?.message || String(e))], isError: true };
   }

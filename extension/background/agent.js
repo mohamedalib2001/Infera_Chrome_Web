@@ -28,6 +28,9 @@ import { COMPACT_THRESHOLD_BYTES, STORAGE_KEYS, PERMISSION_MODES, PERMISSION_TYP
 import { playSound } from './offscreen-client.js';
 import { popupApproval } from './approvals.js';
 import { remoteTools, callRemoteTool } from './remote-mcp.js';
+import { armEffects, readEffects, describeEffects, NO_EFFECT } from './effects.js';
+import { observes } from './tools/browser-toolset.js';
+import { actionKey, changesPage, looksAtPage, repeatNote, VERIFY_NOTE } from './progress.js';
 
 const MAX_TURNS = 200;
 const HISTORY_LIMIT = 50;
@@ -140,6 +143,8 @@ export class AgentSession {
     const mode = this.modeOverride || settings.permissionMode;
     this.runCost = 0;
     this.budgetLimit = Number(settings.taskBudget) || 0;
+    this.misses = new Map();
+    this.tick = 0; this.changedAt = -1; this.seenAt = -1; this.verifyAsked = false;
     this.setStatus('running');
     const keepAlive = setInterval(() => chrome.runtime.getPlatformInfo(), 20_000);
 
@@ -167,6 +172,10 @@ export class AgentSession {
           if (mem) content.push(mem);
         }
         content.push(...this.#attachmentBlocks(attachments));
+        if (this.interrupted) {
+          this.interrupted = false;
+          content.push({ type: 'text', text: '<system-reminder>Your previous run of this task was cut off (the browser or the extension restarted). The steps above happened; look at the page as it is now before continuing, and do not redo what is already done.</system-reminder>' });
+        }
         content.push({ type: 'text', text: userText || '(The user sent only the attached files.)' });
         this.messages.push({ role: 'user', content });
         await this.#loop({ model, mode, settings, toolset, policy });
@@ -450,6 +459,13 @@ export class AgentSession {
       if (!uses.length) {
         // The user wrote while this step was running: answer that too.
         if (this.queue.length) { this.messages.push({ role: 'user', content: this.#drainQueue() }); continue; }
+        // Done means the page shows the goal reached, not that the last click went through: if the page
+        // changed after the agent last looked at it, it looks once more before finishing.
+        if (msg.stop_reason === 'end_turn' && this.changedAt > this.seenAt && !this.verifyAsked) {
+          this.verifyAsked = true;
+          this.messages.push({ role: 'user', content: [{ type: 'text', text: VERIFY_NOTE }] });
+          continue;
+        }
         return; // end_turn / max_tokens without tools
       }
 
@@ -478,8 +494,26 @@ export class AgentSession {
         } else if (!TOOL_BY_NAME[u.name]) {
           r = { content: [{ type: 'text', text: `Unknown tool ${u.name}` }], isError: true };
         } else {
+          const ci = u.input || {};
+          const tabId = ci.tabId ?? (await tabGroups.tabs(this.id).catch(() => [])).find((t) => t.active)?.tabId;
+          const watch = u.name === 'computer' && tabId != null && observes(ci.action, ci) && await armEffects(tabId);
           r = await executeTool(u.name, u.input, this.#toolCtx(mode, settings, u.id));
+          if (watch && !r.isError) {
+            const effect = describeEffects(await readEffects(tabId));
+            if (effect) r = { ...r, content: [...r.content, { type: 'text', text: effect }], effect };
+          }
         }
+        // What really happened, step by step: the same action failing or doing nothing again is called out,
+        // and whether the page was looked at after the last change (for the check before "done").
+        const key = actionKey(u);
+        const noEffect = !r.isError && NO_EFFECT.test(r.effect || '');
+        if (r.isError || noEffect) {
+          const n = (this.misses.get(key) || 0) + 1;
+          this.misses.set(key, n);
+          if (n >= 2) r = { ...r, content: [...r.content, { type: 'text', text: repeatNote(n, r.isError) }] };
+        } else this.misses.delete(key);
+        if (!r.isError && changesPage(u)) { this.changedAt = ++this.tick; if (r.effect && !noEffect) this.seenAt = this.tick; }
+        if (!r.isError && looksAtPage(u)) this.seenAt = ++this.tick;
         this.emit({ type: 'tool_result', id: u.id, name: u.name, isError: !!r.isError, content: r.content.filter((b) => b.type !== 'browser_state').map(uiBlock) });
         results.push(isToolsetUse(u) ? toolsetResult(u, r) : { type: 'tool_result', tool_use_id: u.id, content: r.content, ...(r.isError ? { is_error: true } : {}) });
       }
@@ -489,6 +523,8 @@ export class AgentSession {
       if (this.queue.length) results.push(...this.#drainQueue());
       // All results in ONE user message.
       this.messages.push({ role: 'user', content: results });
+      // Saved as it goes (at most every 10 seconds): a browser restart mid-task doesn't lose what was done.
+      if (Date.now() - (this.savedAt || 0) > 10_000) { this.savedAt = Date.now(); this.#persist().catch(() => {}); }
       if (this.abort.signal.aborted) throw new DOMException('aborted', 'AbortError');
     }
     this.emit({ type: 'error', message: `Stopped after ${MAX_TURNS} steps.` });
@@ -594,7 +630,7 @@ export class AgentSession {
       role: m.role,
       content: Array.isArray(m.content) ? m.content.map(stripForHistory) : m.content,
     }));
-    const entry = { id: this.id, title: this.title, kind: this.kind, createdAt: this.createdAt, updatedAt: Date.now(), status: this.status, messages: stripped, usage: this.usage, cost: this.cost, currency: this.currency };
+    const entry = { id: this.id, title: this.title, kind: this.kind, createdAt: this.createdAt, updatedAt: Date.now(), status: this.status, task: this.task, messages: stripped, usage: this.usage, cost: this.cost, currency: this.currency };
     const next = [entry, ...all.filter((c) => c.id !== this.id)].slice(0, HISTORY_LIMIT);
     await setLocal(STORAGE_KEYS.CONVERSATIONS, next);
     // And in the person's INFERA Agent account, so the history follows them to every device.
@@ -615,6 +651,12 @@ export class AgentSession {
     s.currency = entry.currency || '';
     s.task = entry.title;
     s.status = 'idle';
+    s.interrupted = !!entry.interrupted;
+    // Steps cut off mid-way get a result saying so, so the conversation can go on.
+    const last = s.messages[s.messages.length - 1];
+    if (last?.role === 'assistant' && Array.isArray(last.content) && last.content.some((b) => b.type === 'tool_use')) {
+      s.messages.push({ role: 'user', content: last.content.filter((b) => b.type === 'tool_use').map((u) => errorResult(u, 'Interrupted: the browser stopped before this step finished.')) });
+    }
     return s;
   }
 }

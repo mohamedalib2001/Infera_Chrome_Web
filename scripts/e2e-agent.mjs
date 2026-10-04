@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.dirname(fileURLToPath(import.meta.url));
 const extPath = process.env.EXT_PATH || path.join(root, '..', 'extension');
 const html = fs.readFileSync(path.join(root, 'fixtures', 'test.html'));
+const hardHtml = fs.readFileSync(path.join(root, 'fixtures', 'hard.html'));
 const outDir = process.env.OUT_DIR || os.tmpdir();
 
 const requests = [];
@@ -97,6 +98,33 @@ const server = http.createServer((req, res) => {
           { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'DONE The page title is Infera Test Page.' } },
           { type: 'content_block_stop', index: 0 },
           { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 10 } }, { type: 'message_stop' }]);
+      }
+      if (phase === 'hard') {
+        // A page that fights back: a disabled button (clicked twice), a late answer, a refused form, a dialog,
+        // a navigation — then a change it never looked at before saying it's done.
+        const tu = (id, name, input) => [
+          { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id, name, toolset_name: 'browser', input: {} } },
+          { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: JSON.stringify(input) } },
+          { type: 'content_block_stop', index: 0 },
+          { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }];
+        const at = (x, y) => ({ target: { type: 'coordinate', x: Math.round(x * globalThis.SCALE), y: Math.round(y * globalThis.SCALE) } });
+        const say = (t) => [{ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+          { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: t } }, { type: 'content_block_stop', index: 0 },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }];
+        const k = j.messages.filter((m) => m.role === 'assistant').length;
+        const steps = [
+          () => tu('h1', 'left_click', at(130, 44)),   // disabled button
+          () => tu('h2', 'left_click', at(130, 44)),   // the very same click again
+          () => tu('h3', 'left_click', at(130, 114)),  // save (answers after 700 ms)
+          () => tu('h4', 'left_click', at(130, 184)),  // submit with an empty email
+          () => tu('h5', 'left_click', at(130, 254)),  // opens a dialog
+          () => tu('h6', 'left_click', at(130, 324)),  // a link to the next page
+          () => tu('h7', 'type', { text: 'x' }),       // a change it doesn't look at
+          () => say('All done.'),                      // too early: the platform makes it look first
+          () => tu('h8', 'screenshot', {}),
+          () => say('Checked: on step 2.'),
+        ];
+        return sse(res, [start('h' + k), ...(steps[k] || steps[steps.length - 1])()]);
       }
       if (phase === 'toolset') {
         // Anthropic browser toolset: member tool_use blocks carry toolset_name "browser".
@@ -231,7 +259,7 @@ const server = http.createServer((req, res) => {
     return;
   }
   res.writeHead(200, { 'content-type': 'text/html' });
-  res.end(html);
+  res.end(req.url.startsWith('/hard.html') ? hardHtml : html);
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -340,6 +368,43 @@ await sw.evaluate(async () => { // close the tab the toolset opened
   const tabs = await chrome.tabs.query({ url: 'about:blank' });
   for (const t of tabs) await chrome.tabs.remove(t.id).catch(() => {});
 });
+phase = 'normal';
+
+// A page that fights back: what each action really did, the same miss caught, done only after looking.
+requests.length = 0;
+phase = 'hard';
+await sw.evaluate(async ({ tabId, url }) => { await chrome.tabs.update(tabId, { url }); }, { tabId, url: `${base}/hard.html` });
+await new Promise((r) => setTimeout(r, 1200));
+// Coordinates are in the agent's screenshot frame; the page's CSS pixels are scaled to it.
+globalThis.SCALE = await sw.evaluate(async (tabId) => {
+  const [{ result }] = await chrome.scripting.executeScript({ target: { tabId }, func: () => ({ w: innerWidth, h: innerHeight }) });
+  const MAX = 1568; const s = Math.min(1, MAX / Math.max(result.w, result.h), Math.sqrt((1568 * 28 * 28) / (result.w * result.h)));
+  return s;
+}, tabId);
+const rh = await run('claude-opus-5-5', { classic: false });
+const res = (n) => JSON.stringify(requests[n]?.body.messages.at(-1).content ?? '');
+check('effects: a click on a disabled button is reported as doing nothing', /NO VISIBLE CHANGE/.test(res(1)), res(1).slice(0, 400));
+check('effects: the same miss again is called out with what to check', /had no visible effect 2 times/.test(res(2)), res(2).slice(0, 400));
+check('effects: a late answer is waited for and read', /Saved successfully/.test(res(3)), res(3).slice(0, 400));
+check('effects: a refused form shows its errors', /Form errors: Email|Email is required/.test(res(4)), res(4).slice(0, 400));
+check('effects: a dialog that opened is named, and old messages are not repeated', /Open dialog: \\"Confirm delete\\"/.test(res(5)) && !/Saved successfully|Email is required/.test(res(5)), res(5).slice(0, 400));
+check('effects: a navigation is reported with the new page', /Page changed to .*hard\.html\?step=2/.test(res(6)), res(6).slice(0, 400));
+check('done only after looking: the unchecked change sends it back to look once', /Check that it really shows the goal reached/.test(res(8)) && requests.filter((r) => JSON.stringify(r.body).includes('Check that it really shows the goal reached')).length >= 1 && rh.status === 'done', `${requests.length} ${rh.status}`);
+// Cut off mid-task (the browser stopped): kept, marked, and the next run is told to look before going on.
+const cut = await sw.evaluate(async () => {
+  const I = self.__infera;
+  const conv = { id: 'cut-1', title: 'Fill the report', kind: 'panel', createdAt: Date.now(), updatedAt: Date.now(), status: 'running', messages: [
+    { role: 'user', content: [{ type: 'text', text: 'Fill the report' }] },
+    { role: 'assistant', content: [{ type: 'tool_use', id: 'tu_cut', name: 'computer', input: { action: 'screenshot' } }] }] };
+  await chrome.storage.local.set({ conversations: [conv] });
+  const changed = await I.markInterrupted();
+  const stored = (await chrome.storage.local.get('conversations')).conversations[0];
+  const s = I.AgentSession.fromHistory(stored, null);
+  return { changed, status: stored.status, interrupted: s.interrupted, closed: s.messages.at(-1).content[0]?.is_error === true && /Interrupted/.test(JSON.stringify(s.messages.at(-1))) };
+});
+check('interrupted task: marked stopped (not running), steps kept, the cut step answered', cut.changed && cut.status === 'stopped' && cut.interrupted && cut.closed, JSON.stringify(cut));
+await sw.evaluate(async ({ tabId, url }) => { await chrome.tabs.update(tabId, { url }); }, { tabId, url: `${base}/test.html` });
+await new Promise((r) => setTimeout(r, 800));
 phase = 'normal';
 
 // Web research, citations, memory and file attachments (Claude Opus 5.5).
