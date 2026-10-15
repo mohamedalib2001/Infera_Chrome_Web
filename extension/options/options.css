@@ -12,7 +12,8 @@ section > p.muted { margin: 0 0 14px; font-size: 13px; }
 .check input { width: auto; margin-top: 3px; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th, td { text-align: start; padding: 7px 6px; border-bottom: 1px solid var(--border); }
+th, td { text-align: start; padding: 7px 6px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.card p { overflow-wrap: anywhere; }
 th { color: var(--muted); font-weight: 600; font-size: 12px; }
 .pill { display: inline-flex; gap: 6px; align-items: center; font-weight: 600; font-size: 13px; }
 .pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }

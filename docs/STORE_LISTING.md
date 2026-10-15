@@ -29,6 +29,8 @@ Safety first
 
 Works in Arabic and English, with light and dark themes.
 
+Infera Agent is developed and operated by Infera Engine Ltd, registered in England and Wales (company no. 17520775), 128 City Road, London EC1V 2NX, United Kingdom.
+
 ### الوصف (العربية)
 
 إنفرا إيجنت وكيل تصفح يعمل داخل متصفح Chrome الخاص بك. اطلب ما تريد باللغة الطبيعية، فيقرأ الصفحة وينقر ويكتب ويمرّر ويعبّئ النماذج ويعمل عبر التبويبات — مستخدمًا المواقع التي سجّلت الدخول إليها. تشاهد كل خطوة في اللوحة الجانبية، ويمكنك الإيقاف أو استعادة التحكم في أي لحظة.
@@ -51,6 +53,8 @@ Works in Arabic and English, with light and dark themes.
 • محتوى الصفحات يُعامَل كبيانات غير موثوقة، والنصوص المخفية تُحذف لمقاومة حقن التعليمات
 
 يعمل بالعربية والإنجليزية، مع الوضع الفاتح والداكن.
+
+تطوّر إنفرا إيجنت وتشغّلها شركة Infera Engine Ltd، المسجّلة في إنجلترا وويلز (رقم الشركة 17520775)، 128 City Road, London EC1V 2NX, United Kingdom.
 
 ### Graphic assets
 - Store icon: `extension/icons/icon128.png`
@@ -89,7 +93,23 @@ Works in Arabic and English, with light and dark themes.
 
 Certify all three: not sold to third parties; not used for unrelated purposes; not used for creditworthiness or lending.
 
-**Privacy policy URL:** https://github.com/mohamedalib2001/Infera_Chrome_Web/blob/claude/pensive-dijkstra-r61pm0/docs/PRIVACY.md
+**Privacy policy URL:** https://inferaagent.com/privacy (the service policy; section 11a covers the extension, including the Chrome Web Store Limited Use statement). Full extension text: `docs/PRIVACY.md`.
+
+## Account → Publisher and trader details
+
+The developer account belongs to a company, so declare it as a **trader**. The store shows these details
+to EU users, as the Digital Services Act requires.
+
+| Field | Value |
+|---|---|
+| Publisher display name | Infera Engine Ltd |
+| Trader status | Trader (a business) |
+| Legal name | Infera Engine Ltd (private company limited by shares, England and Wales, company no. 17520775) |
+| Address | 128 City Road, London, EC1V 2NX, United Kingdom |
+| Email (verified) | support@inferaengine.com |
+| Phone (verified) | the company's phone number (to be added by the owner) |
+| Website (verified) | https://inferaengine.com |
+| Support URL / email on the listing | https://inferaagent.com · support@inferaengine.com |
 
 ## Distribution
 Free · Public · All regions.

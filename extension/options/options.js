@@ -1,5 +1,6 @@
 // Infera Agent — settings page.
 import { setLanguage, currentLang, MODE_LABEL, t } from '../lib/i18n.js';
+import { COMPANY, companyLine } from '../lib/company.js';
 
 const $ = (s) => document.querySelector(s);
 const send = (type, extra = {}) => chrome.runtime.sendMessage({ type, ...extra }).then((r) => { if (r?.error) throw new Error(r.error); return r?.data; });
@@ -16,6 +17,7 @@ const el = (tag, attrs = {}, ...kids) => {
 
 const L = {
   en: {
+    about: 'About and legal', aboutHint: 'Infera Agent for Chrome is published and operated by:', privacyPolicy: 'Privacy policy', terms: 'Terms of use', supportMail: 'Support', privacyMail: 'Privacy and data requests', ico: 'You can also complain to the UK Information Commissioner\'s Office (ico.org.uk).',
     subtitle: 'Settings, permissions and connections', account: 'Infera Agent account', accountHint: 'Sign in with your INFERA Agent account on inferaagent.com. Model requests go through INFERA Agent and are paid from your credits, so no API key is stored in the browser. An INFERA Agent account is required to use the extension.',
     signIn: 'Sign in', signOut: 'Sign out', signedIn: 'Signed in', notSignedIn: 'Not signed in',
     behaviour: 'Agent behaviour', behaviourHint: 'Defaults for new tasks. You can also change the model and approval mode from the side panel.',
@@ -39,6 +41,7 @@ const L = {
     srvName: 'Name', srvUrl: 'URL (https://…/mcp)', srvAuth: 'Authorization header (optional)', add: 'Add server', remove: 'Remove', noServers: 'No remote MCP servers.',
   },
   ar: {
+    about: 'عن الإضافة والمعلومات القانونية', aboutHint: 'تنشر إضافة Infera Agent for Chrome وتشغّلها:', privacyPolicy: 'سياسة الخصوصية', terms: 'شروط الاستخدام', supportMail: 'الدعم', privacyMail: 'الخصوصية وطلبات البيانات', ico: 'ويحق لك أيضًا تقديم شكوى إلى مكتب مفوّض المعلومات في المملكة المتحدة (ico.org.uk).',
     subtitle: 'الإعدادات والأذونات والاتصالات', account: 'حساب إنفرا إيجنت', accountHint: 'سجّل الدخول بحسابك على inferaagent.com. تمرّ طلبات النموذج عبر إنفرا إيجنت وتُخصم من رصيدك، فلا يُخزَّن أي مفتاح API في المتصفح. استخدام الإضافة يتطلب حسابًا على إنفرا إيجنت.',
     signIn: 'تسجيل الدخول', signOut: 'تسجيل الخروج', signedIn: 'تم تسجيل الدخول', notSignedIn: 'لم يتم تسجيل الدخول',
     behaviour: 'سلوك الوكيل', behaviourHint: 'الإعدادات الافتراضية للمهام الجديدة، ويمكن تغيير النموذج ووضع الموافقة من اللوحة الجانبية أيضًا.',
@@ -224,6 +227,16 @@ async function render() {
     el('h2', {}, tr('policy')), el('p', { class: 'muted' }, keys.length ? tr('policyHint') : tr('noPolicy')),
     keys.length ? el('pre', { class: 'cmd' }, JSON.stringify(policy, null, 2)) : null,
     el('p', { class: 'muted', style: 'font-size:12px;margin:10px 0 0' }, `Extension ID: ${chrome.runtime.id} · v${chrome.runtime.getManifest().version}`)));
+
+  // About and legal: the registered company behind the extension (UK trading disclosures).
+  const link = (href, text) => el('a', { href, target: '_blank', rel: 'noopener' }, text);
+  const mail = (addr) => link(`mailto:${addr}`, addr);
+  app.append(el('section', { class: 'card', id: 'about' },
+    el('h2', {}, tr('about')), el('p', { class: 'muted' }, tr('aboutHint')),
+    el('p', {}, companyLine(currentLang())),
+    el('p', {}, link(COMPANY.privacyUrl, tr('privacyPolicy')), ' · ', link(COMPANY.termsUrl, tr('terms')), ' · ', link(COMPANY.website, COMPANY.website.replace('https://', ''))),
+    el('p', { class: 'muted' }, `${tr('supportMail')}: `, mail(COMPANY.emails.support), ' · ', `${tr('privacyMail')}: `, mail(COMPANY.emails.privacy)),
+    el('p', { class: 'muted', style: 'font-size:12px' }, tr('ico'))));
 }
 
 render();

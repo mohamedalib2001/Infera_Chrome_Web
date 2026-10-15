@@ -661,6 +661,11 @@ await op.goto(`chrome-extension://${extId}/options/options.html`);
 await op.waitForTimeout(800);
 await op.screenshot({ path: path.join(outDir, 'options.png'), fullPage: true });
 check('options page renders', (await op.locator('section.card').count()) >= 5);
+const about = await op.locator('#about').innerText().catch(() => '');
+check('settings: the registered company (UK trading disclosure) and legal links', /Infera Engine Ltd/.test(about) && /17520775/.test(about) && /128 City Road/.test(about) && /privacy@inferaengine\.com/.test(about)
+  && (await op.locator('#about a[href="https://inferaagent.com/privacy"]').count()) === 1, about.slice(0, 300));
+const sys0 = JSON.stringify(requests.length ? requests[0].body.system : '');
+check('agent knows its company: Infera Engine Ltd, England and Wales, no. 17520775', /Infera Engine Ltd/.test(sys0) && /17520775/.test(sys0), sys0.slice(0, 200));
 
 let fails = 0;
 for (const c of checks) { if (!c.ok) fails++; console.log(`${c.ok ? 'PASS' : 'FAIL'}  ${c.name}${c.info ? `  (${c.info})` : ''}`); }
