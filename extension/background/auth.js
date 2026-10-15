@@ -245,6 +245,18 @@ export async function inferaMemory(method, id, entry, retried = false) {
   }
 }
 
+// Any other browser-agent endpoint of the person's account (tasks, team policy).
+export async function inferaApi(path, { method = 'GET', body } = {}, retried = false) {
+  const a = await currentInfera();
+  if (!a) throw new Error('Not signed in.');
+  try {
+    return await inferaFetch(`${a.server}/api/browser-agent/${path}`, { token: a.accessToken, method, body });
+  } catch (e) {
+    if (e.status === 401 && !retried && await refreshInferaToken(a)) return inferaApi(path, { method, body }, true);
+    throw e;
+  }
+}
+
 // Access token for other INFERA Agent services (the cloud relay).
 export async function getAccessToken() {
   return (await currentInfera())?.accessToken ?? null;

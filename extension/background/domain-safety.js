@@ -5,6 +5,7 @@
 //   category_org_blocked blocked by organization policy (managed storage)
 // Local rules are always applied; an optional remote classifier (settings)
 // can refine them. Results are cached for 5 minutes.
+import { orgPolicy } from './account-sync.js';
 import { DOMAIN_CACHE_TTL_MS, RESTRICTED_HOSTS } from './constants.js';
 import { getSettings, getManagedPolicy } from './storage.js';
 
@@ -46,12 +47,15 @@ export async function classifyHost(host) {
 
   const policy = await getManagedPolicy();
   const settings = await getSettings();
+  const org = await orgPolicy();
   let result = { category: 'category0' };
 
   if ((policy.blocklist || []).some((p) => hostMatches(host, p))) {
     result = { category: 'category_org_blocked', reason: 'Blocked by your organization' };
   } else if ((policy.allowlist || []).length && !(policy.allowlist || []).some((p) => hostMatches(host, p))) {
     result = { category: 'category_org_blocked', reason: 'Not on your organization\'s allowlist' };
+  } else if ((org.blocklist || []).some((p) => hostMatches(host, p))) {
+    result = { category: 'category_org_blocked', reason: `Blocked by your team${org.orgs?.length ? ` (${org.orgs.join(', ')})` : ''}` };
   } else if ((settings.userBlocklist || []).some((p) => hostMatches(host, p))) {
     result = { category: 'category1', reason: 'On your personal blocklist' };
   } else {

@@ -97,3 +97,30 @@ node scripts/build-store.mjs --api-url https://inferaagent.com --version 1.0.0
 ```
 
 المفاتيح المتاحة موصوفة في `extension/managed_schema.json`.
+
+### Microsoft Intune / سياسات Windows (السجل)
+
+```
+HKLM\Software\Policies\Google\Chrome\ExtensionInstallForcelist
+  1 = "nablmcconmoblabfpbcfaplmbijmgdjc;https://clients2.google.com/service/update2/crx"
+HKLM\Software\Policies\Google\Chrome\3rdparty\extensions\nablmcconmoblabfpbcfaplmbijmgdjc\policy
+  defaultPermissionMode = "ask"
+  disableSkipAllApprovals = 1 (DWORD)
+  blocklist = ["bank.example"]
+```
+
+في Intune: Devices ← Configuration ← Settings catalog ← Google Chrome ← Extensions ← «Configure the list of
+force-installed apps and extensions»، وأضف المعرّف أعلاه؛ والإعدادات تحت «3rdparty» كـ OMA-URI أو ملف ADMX.
+
+### macOS (ملف إعداد .mobileconfig / Jamf)
+
+```xml
+<key>ExtensionInstallForcelist</key>
+<array><string>nablmcconmoblabfpbcfaplmbijmgdjc;https://clients2.google.com/service/update2/crx</string></array>
+```
+
+### قواعد الفريق من الحساب (بدون إدارة أجهزة)
+
+لمن لا يدير أجهزته مركزيًا: صاحب الحساب على inferaagent.com يضبط من **الإعدادات ← الفريق ← وكيل المتصفح**
+تشغيل الوكيل للزملاء أو إيقافه، والمواقع التي لا يفتحها أبدًا، وحدًا يوميًا لكل زميل. الخادم يطبّق الإيقاف
+والحد، والإضافة تطبّق قائمة المواقع خلال 15 دقيقة، ويظهر للزميل في إعدادات الإضافة أن فريقه يطبّق قواعده.

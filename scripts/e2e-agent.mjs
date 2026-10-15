@@ -56,6 +56,30 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
+  if (req.url.startsWith('/api/browser-agent/policy')) {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(globalThis.ORG || { orgs: [], blocked: false, blockedBy: '', blocklist: [], memberDailyCap: null }));
+    return;
+  }
+  if (req.url.startsWith('/api/browser-agent/tasks')) {
+    const tasks = (globalThis.TASKS ||= []);
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      const id = Number(req.url.split('?')[0].split('/')[4] || 0);
+      if (req.method === 'PATCH') {
+        const t = tasks.find((x) => x.id === id);
+        const b = JSON.parse(body || '{}');
+        (globalThis.TASK_LOG ||= []).push(`${id}:${b.status}`);
+        if (!t || (b.status === 'running' && t.status !== 'queued')) { res.writeHead(409); return res.end('{}'); }
+        Object.assign(t, b);
+        return res.end(JSON.stringify(t));
+      }
+      res.end(JSON.stringify(tasks.filter((t) => t.status === 'queued')));
+    });
+    return;
+  }
   if (req.url.startsWith('/api/browser-agent/limits')) {
     let body = '';
     req.on('data', (c) => { body += c; });
@@ -706,6 +730,27 @@ check('skills: saved as /daily-prices with its {{product}} parameter and a daily
 const hist = await sw.evaluate(() => self.__infera.panelCall(null, { type: 'history_list', q: 'cheaper', paged: true }));
 check('history: search finds a conversation by its content', Array.isArray(hist.items) && hist.items.length > 0 && hist.items.every((c) => /cheaper|shop/i.test(c.title || '')), JSON.stringify(hist).slice(0, 300));
 
+// The account: the team's blocked sites apply here, and a task sent from the app is
+// picked up, run in its own window, and its result reported back.
+globalThis.ORG = { orgs: ['Acme Owner'], blocked: false, blockedBy: '', blocklist: ['crm.example'], memberDailyCap: 5 };
+globalThis.TASKS = [{ id: 7, prompt: 'Say hello from the account', startUrl: '', status: 'queued' }];
+requests.length = 0;
+phase = 'plain';
+const acct = await sw.evaluate(async () => {
+  const I = self.__infera;
+  await I.updateSettings({ model: 'claude-opus-5-5', permissionMode: 'skip_all_permission_checks' });
+  await I.optionsCall({ type: 'org_policy' }); // the settings page refreshes the team's rules at once
+  await I.accountTick();
+  const c = await I.classifyUrl('https://app.crm.example/deals');
+  const all = (await chrome.storage.local.get('conversations')).conversations || [];
+  return { category: c.category, reason: c.reason, saved: all.some((x) => /^📱/.test(x.title || '')) };
+});
+check('team rules: a site the team blocked is blocked here, named after the team', acct.category === 'category_org_blocked' && /Acme Owner/.test(acct.reason), JSON.stringify(acct));
+check('tasks from the account: taken, run in its own window, result reported', globalThis.TASK_LOG?.join() === '7:running,7:done' && /Hello again/.test(globalThis.TASKS[0].result || '') && globalThis.TASKS[0].conversationId && acct.saved, JSON.stringify({ log: globalThis.TASK_LOG, t: globalThis.TASKS[0] }).slice(0, 300));
+const again = await sw.evaluate(() => self.__infera.accountTick());
+check('tasks from the account: nothing new, nothing run', globalThis.TASK_LOG.length === 2, JSON.stringify(globalThis.TASK_LOG));
+phase = 'normal';
+
 // A task cut off mid-step (browser closed) continues cleanly from the history.
 const resumed = await sw.evaluate(() => {
   const s = self.__infera.AgentSession.fromHistory({ id: 'cut-1', title: 'cut', messages: [
@@ -744,6 +789,7 @@ await op.waitForTimeout(800);
 await op.screenshot({ path: path.join(outDir, 'options.png'), fullPage: true });
 check('options page renders', (await op.locator('section.card').count()) >= 5);
 const about = await op.locator('#about').innerText().catch(() => '');
+check('settings: the team applying its rules is shown', /Acme Owner/.test(await op.locator('#teamPolicy').innerText().catch(() => '')));
 check('settings: the registered company (UK trading disclosure) and legal links', /Infera Engine Ltd/.test(about) && /17520775/.test(about) && /128 City Road/.test(about) && /privacy@inferaengine\.com/.test(about)
   && (await op.locator('#about a[href="https://inferaagent.com/privacy"]').count()) === 1, about.slice(0, 300));
 const sys0 = JSON.stringify(requests.length ? requests[0].body.system : '');

@@ -172,6 +172,22 @@ If an endpoint rejects the toolset, the session falls back to the classic tools 
 * **History** — the History drawer searches titles and contents (this browser and the account,
   `GET /api/browser-agent/conversations?q=`) and loads older pages on demand.
 
+## Inside the Infera Agent account
+
+* **One memory with the app** — `GET /api/browser-agent/memory` also returns what the app's agent remembered
+  (`user_memories`, ids `a_…`, `source: "app"`; forgetting one in the extension deletes it in the app), and the
+  app's agent context lists the browser agent's memories (pinned first, up to 40).
+* **Team rules** — `account-sync.js`. An account owner's policy for teammates (`browser_team_policies`:
+  members allowed/blocked, a site blocklist, a daily cap per teammate) is enforced by the gateway (403 when
+  turned off, 402 at the cap) and fetched by the extension every 15 minutes (`GET /api/browser-agent/policy`,
+  strictest of all the teams the person belongs to); `domain-safety.js` blocks the team's sites as
+  `category_org_blocked`. The settings page shows which team applies its rules.
+* **Tasks from the app or a phone** — `browser_tasks`: the person sends a task in the app (Settings → Chrome,
+  `POST /api/browser-tasks`); the extension checks every minute (alarm `infera-account`, setting
+  `remoteTasks`), takes one atomically (`PATCH …/tasks/:id {status: "running"}`), runs it like a scheduled
+  task in a window of its own with the person's permission mode, and reports the status, the final answer
+  and the conversation id. Queueing, finishing and cancelling are in the account's activity log.
+
 ## Costs
 
 * **Prompt caching of the history** (`llm.js`): every step re-sends the whole conversation, so the newest

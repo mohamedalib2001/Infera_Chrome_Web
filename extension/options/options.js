@@ -18,6 +18,7 @@ const el = (tag, attrs = {}, ...kids) => {
 const L = {
   en: {
     about: 'About and legal', aboutHint: 'Infera Agent for Chrome is published and operated by:', privacyPolicy: 'Privacy policy', terms: 'Terms of use', supportMail: 'Support', privacyMail: 'Privacy and data requests', ico: 'You can also complain to the UK Information Commissioner\'s Office (ico.org.uk).',
+    remoteTasks: 'Run tasks I send from my Infera Agent account (app or phone) in this browser', teamRules: 'Your team ({orgs}) applies its rules here: {n} blocked sites.', teamCap: 'Daily limit: {cap}.', teamOff: 'The team has turned the browser agent off.', fromApp: 'from the app',
     subtitle: 'Settings, permissions and connections', account: 'Infera Agent account', accountHint: 'Sign in with your INFERA Agent account on inferaagent.com. Model requests go through INFERA Agent and are paid from your credits, so no API key is stored in the browser. An INFERA Agent account is required to use the extension.',
     signIn: 'Sign in', signOut: 'Sign out', signedIn: 'Signed in', notSignedIn: 'Not signed in',
     behaviour: 'Agent behaviour', behaviourHint: 'Defaults for new tasks. You can also change the model and approval mode from the side panel.',
@@ -42,6 +43,7 @@ const L = {
   },
   ar: {
     about: 'عن الإضافة والمعلومات القانونية', aboutHint: 'تنشر إضافة Infera Agent for Chrome وتشغّلها:', privacyPolicy: 'سياسة الخصوصية', terms: 'شروط الاستخدام', supportMail: 'الدعم', privacyMail: 'الخصوصية وطلبات البيانات', ico: 'ويحق لك أيضًا تقديم شكوى إلى مكتب مفوّض المعلومات في المملكة المتحدة (ico.org.uk).',
+    remoteTasks: 'نفّذ في هذا المتصفح المهام التي أرسلها من حسابي على إنفرا إيجنت (التطبيق أو الهاتف)', teamRules: 'يطبّق فريقك ({orgs}) قواعده هنا: {n} موقعًا محظورًا.', teamCap: 'الحد اليومي: {cap}.', teamOff: 'أوقف الفريق وكيل المتصفح.', fromApp: 'من التطبيق',
     subtitle: 'الإعدادات والأذونات والاتصالات', account: 'حساب إنفرا إيجنت', accountHint: 'سجّل الدخول بحسابك على inferaagent.com. تمرّ طلبات النموذج عبر إنفرا إيجنت وتُخصم من رصيدك، فلا يُخزَّن أي مفتاح API في المتصفح. استخدام الإضافة يتطلب حسابًا على إنفرا إيجنت.',
     signIn: 'تسجيل الدخول', signOut: 'تسجيل الخروج', signedIn: 'تم تسجيل الدخول', notSignedIn: 'لم يتم تسجيل الدخول',
     behaviour: 'سلوك الوكيل', behaviourHint: 'الإعدادات الافتراضية للمهام الجديدة، ويمكن تغيير النموذج ووضع الموافقة من اللوحة الجانبية أيضًا.',
@@ -113,9 +115,12 @@ async function render() {
         catch (e) { errA.textContent = e.message; }
       } }, t('signIn')), errA));
 
+  const team = await send('org_policy').catch(() => null);
   app.append(el('section', { class: 'card' },
     el('h2', {}, tr('account')), el('p', { class: 'muted' }, tr('accountHint')),
-    inferaBlock));
+    inferaBlock,
+    team?.orgs?.length ? el('p', { class: 'muted', id: 'teamPolicy' }, tr('teamRules').replace('{orgs}', team.orgs.join(', ')).replace('{n}', team.blocklist?.length || 0)
+      + (team.memberDailyCap ? ` ${tr('teamCap').replace('{cap}', team.memberDailyCap)}` : '') + (team.blocked ? ` ${tr('teamOff')}` : '')) : null));
 
   // Behaviour
   const model = select(MODELS, s.model);
@@ -130,13 +135,14 @@ async function render() {
   const mem = el('input', { type: 'checkbox', checked: s.memory !== false ? true : undefined });
   const tabsAll = el('input', { type: 'checkbox', checked: s.allTabsAccess !== false ? true : undefined });
   const sync = el('input', { type: 'checkbox', checked: s.syncHistory !== false ? true : undefined });
+  const remote = el('input', { type: 'checkbox', checked: s.remoteTasks !== false ? true : undefined });
   const savedB = el('span', { class: 'saved' });
   app.append(el('section', { class: 'card' },
     el('h2', {}, tr('behaviour')), el('p', { class: 'muted' }, tr('behaviourHint')),
     el('div', { class: 'fields' }, field(tr('model'), model), field(tr('effort'), effort), field(tr('mode'), mode), field(tr('language'), lang)),
-    el('div', { style: 'display:grid;gap:8px;margin-top:12px' }, check(tr('safety'), safety), check(tr('notif'), notif), check(tr('sound'), sound), check(tr('web'), web), check(tr('memoryOn'), mem), check(tr('allTabs'), tabsAll), check(tr('sync'), sync)),
+    el('div', { style: 'display:grid;gap:8px;margin-top:12px' }, check(tr('safety'), safety), check(tr('notif'), notif), check(tr('sound'), sound), check(tr('web'), web), check(tr('memoryOn'), mem), check(tr('allTabs'), tabsAll), check(tr('sync'), sync), check(tr('remoteTasks'), remote)),
     el('div', { class: 'actions' }, el('button', { class: 'btn primary', onclick: async () => {
-      await send('update_settings', { patch: { model: model.value, effort: effort.value, permissionMode: mode.value, language: lang.value, safetyChecker: safety.checked, notifications: notif.checked, sound: sound.checked, webResearch: web.checked, memory: mem.checked, allTabsAccess: tabsAll.checked, syncHistory: sync.checked } });
+      await send('update_settings', { patch: { model: model.value, effort: effort.value, permissionMode: mode.value, language: lang.value, safetyChecker: safety.checked, notifications: notif.checked, sound: sound.checked, webResearch: web.checked, memory: mem.checked, allTabsAccess: tabsAll.checked, syncHistory: sync.checked, remoteTasks: remote.checked } });
       savedB.textContent = tr('saved');
       if (lang.value !== s.language) render();
     } }, tr('save')), savedB)));
@@ -144,7 +150,7 @@ async function render() {
   // Long-term memory
   const memories = await send('list_memory');
   const memRow = (m) => el('tr', {},
-    el('td', {}, m.pinned ? el('span', { title: tr('pinned') }, '★ ') : null, m.text, m.topic ? el('span', { class: 'muted' }, ` · ${m.topic}`) : null),
+    el('td', {}, m.pinned ? el('span', { title: tr('pinned') }, '★ ') : null, m.text, m.topic ? el('span', { class: 'muted' }, ` · ${m.topic}`) : null, m.source === 'app' ? el('span', { class: 'muted' }, ` · ${tr('fromApp')}`) : null),
     el('td', { class: 'muted', style: 'white-space:nowrap' }, new Date(m.updatedAt || m.createdAt).toLocaleDateString()),
     el('td', {}, el('button', { class: 'btn', onclick: async () => { await send('forget_memory', { id: m.id }); render(); } }, tr('remove'))));
   const memBody = el('tbody', {}, ...memories.slice(0, 200).map(memRow));

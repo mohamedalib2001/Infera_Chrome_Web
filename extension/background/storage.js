@@ -18,6 +18,7 @@ export const DEFAULT_SETTINGS = {
   webResearch: true,   // web search + web fetch (server tools) with models that support them
   memory: true,        // long-term memory of the user's preferences
   allTabsAccess: true, // the agent may see and manage every tab (all_tabs), not only its group
+  remoteTasks: true,   // run tasks sent from the person's Infera Agent account (app, phone)
   syncHistory: true,   // keep conversations in the person's INFERA Agent account (all devices)
   taskBudget: 3,       // per task, in the account currency: ask before spending more (0 = no limit)
 };

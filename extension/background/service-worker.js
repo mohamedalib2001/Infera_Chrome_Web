@@ -18,6 +18,7 @@ import { spentToday } from './spend.js';
 import { overlay } from './page.js';
 import { executeTool } from './tools/executor.js';
 import { buildFile } from './tools/files.js';
+import { ACCOUNT_ALARM, orgPolicy, refreshOrgPolicy, pollAccountTasks } from './account-sync.js';
 import { listMemory, forgetMemory, clearMemory } from './memory.js';
 import { listServers, saveServer, deleteServer } from './remote-mcp.js';
 
@@ -303,6 +304,7 @@ async function handleMessage(msg, sender) {
     case 'refresh_account': return refreshInferaAccount();
     case 'classify': return classifyUrl(msg.url);
     case 'list_memory': return listMemory({ fresh: true });
+    case 'org_policy': { const p = await refreshOrgPolicy({ force: true }); clearDomainCache(); return p; }
     case 'forget_memory': await forgetMemory(msg.id); return listMemory();
     case 'clear_memory': await clearMemory(); return [];
     case 'list_mcp_servers': return listServers();
@@ -374,9 +376,34 @@ chrome.downloads.onCreated.addListener(async (item) => {
 
 // ---------------- scheduled tasks ----------------
 chrome.alarms.onAlarm.addListener((a) => {
+  if (a.name === ACCOUNT_ALARM) return accountTick();
   const id = taskIdFromAlarm(a.name);
   if (id) runScheduledTask(id);
 });
+
+// ---------------- the Infera Agent account: team rules, tasks sent from the app ----------------
+chrome.alarms.create(ACCOUNT_ALARM, { periodInMinutes: 1 });
+async function accountTick() {
+  if (!(await authStatus().catch(() => null))?.server) return;
+  const before = (await orgPolicy()).blocklist?.join();
+  const p = await refreshOrgPolicy();
+  if (p.blocklist?.join() !== before) clearDomainCache();
+  await pollAccountTasks(runAccountTask);
+}
+
+async function runAccountTask(task) {
+  const s = new AgentSession({ kind: 'scheduled', title: `📱 ${task.prompt.slice(0, 70)}` });
+  wireSession(s);
+  sessions.set(s.id, s);
+  const win = await chrome.windows.create({ url: /^https?:\/\//.test(task.startUrl || '') ? task.startUrl : 'about:blank', focused: false });
+  s.windowId = win.id;
+  await tabGroups.adoptTab(s.id, win.tabs[0].id, 'scheduled');
+  chrome.notifications.create(`infera-done:${s.id}`, { type: 'basic', iconUrl: 'icons/icon128.png', title: 'Infera Agent', message: `Task from your account: ${task.prompt.slice(0, 120)}` });
+  await s.run(task.prompt, { startTabId: win.tabs[0].id }).catch(() => {});
+  const last = [...s.messages].reverse().find((m) => m.role === 'assistant' && Array.isArray(m.content) && m.content.some((b) => b.type === 'text' && b.text.trim()));
+  const result = (last?.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+  return { status: s.status, result, conversationId: s.id };
+}
 
 async function runScheduledTask(id) {
   const task = (await listTasks()).find((t) => t.id === id);
@@ -411,4 +438,5 @@ self.__infera = {
   panelCall: async (windowId, msg) => handlePanel(msg, await sessionForWindow(windowId), { postMessage() {} }),
   // A settings-page message (tests).
   optionsCall: (msg) => handleMessage(msg, {}),
+  accountTick: () => accountTick(),
 };
