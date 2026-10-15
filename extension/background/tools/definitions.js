@@ -356,6 +356,23 @@ export const TASK_TOOLS = [
   },
 ];
 
+// Work outside the browser, by Infera Agent Desktop on the person's computer
+// (offered only while the desktop app is running and linked).
+export const DESKTOP_TOOLS = [
+  {
+    name: 'desktop_task',
+    description: 'Hand a task OUTSIDE the browser to Infera Agent Desktop, the desktop agent on the user\'s computer: open or use a desktop app, read or save a local file (e.g. save the report you made into Documents, read a spreadsheet from the Desktop folder), run a command, check the system. The desktop shows the user your request and runs it only if they allow it; it returns its final answer. Write complete, standalone instructions and say what to report back. Never use it for anything you can do in the browser.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        task: { type: 'string', description: 'What the desktop agent should do, fully explained.' },
+        context: { type: 'string', description: 'Facts it needs from your work so far (names, numbers, file names).' },
+      },
+      required: ['task'],
+    },
+  },
+];
+
 // Results as files, saved skills, and parallel helpers (side panel; handled in the
 // executor, except delegate_tasks, which the agent loop runs).
 export const WORK_TOOLS = [
@@ -419,4 +436,4 @@ export const WORK_TOOLS = [
 
 export const PANEL_TOOLS = [...MCP_TOOLS, ...CLASSIC_TOOLS];
 
-export const TOOL_BY_NAME = Object.fromEntries([...PANEL_TOOLS, ...MEMORY_TOOLS, ...ALL_TABS_TOOLS, ...TASK_TOOLS, ...WORK_TOOLS].map((t) => [t.name, t]));
+export const TOOL_BY_NAME = Object.fromEntries([...PANEL_TOOLS, ...MEMORY_TOOLS, ...ALL_TABS_TOOLS, ...TASK_TOOLS, ...WORK_TOOLS, ...DESKTOP_TOOLS].map((t) => [t.name, t]));

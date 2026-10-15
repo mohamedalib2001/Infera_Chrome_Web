@@ -20,6 +20,7 @@ import { completeText, validateInput } from '../llm.js';
 import { listShortcuts, findShortcut, saveShortcut } from '../shortcuts.js';
 import { saveTask } from '../scheduler.js';
 import { buildFile } from './files.js';
+import { nativeBridge } from '../native-bridge.js';
 import { saveMemory, searchMemory, forgetMemory } from '../memory.js';
 import { TOOL_BY_NAME } from './definitions.js';
 import {
@@ -647,6 +648,14 @@ const impl = {
     // Chrome may number a name already taken ("Report (1).pdf").
     const name = saved.startsWith(f.filename.replace(/\.[^.]+$/, '')) ? saved : f.filename;
     return ok(text(`Saved ${name} (${Math.max(1, Math.round(f.bytes / 1024))} KB) to the Downloads/Infera folder.`));
+  },
+
+  async desktop_task(ctx, input) {
+    const task = String(input.task || '').trim();
+    if (!task) fail('Say what the desktop agent should do.');
+    const r = await nativeBridge.desktopTask(task, input.context || '');
+    if (!r.ok) fail(r.denied ? 'The user declined this request on the desktop.' : r.error || 'Infera Agent Desktop could not run it.');
+    return ok(text(`Infera Agent Desktop — ${r.status || 'done'}:\n${r.result || '(no answer)'}`));
   },
 
   async skill_save(ctx, input) {

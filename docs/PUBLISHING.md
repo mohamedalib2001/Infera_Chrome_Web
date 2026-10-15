@@ -75,6 +75,20 @@ node scripts/build-store.mjs --api-url https://inferaagent.com --version 1.0.0
 | `downloads` | حفظ تسجيلات GIF واللقطات، والتنزيلات بعد موافقة المستخدم |
 | `<all_urls>` | الوكيل يعمل على أي موقع يطلبه المستخدم |
 
+## 3أ) Microsoft Edge Add-ons
+
+نفس ملف ZIP يعمل على Edge دون تعديل. افتح https://partner.microsoft.com/dashboard/microsoftedge ← حساب مطوّر
+(مجاني) ← **Create new extension** ← ارفع `dist/infera-agent-<version>.zip`، ثم انسخ الوصف وسياسة الخصوصية
+(https://inferaagent.com/privacy) والتبريرات نفسها. عنوان الناشر: Infera Engine Ltd. بعد النشر يُضاف معرّف
+Edge إلى `allowed_origins` بتشغيل `node native-host/install.js --extension-id <معرّف المتجر>,<معرّف Edge>`،
+ويُضاف إلى قائمة `EXTENSION_IDS` في تطبيق سطح المكتب.
+
+## 3ب) النشر المتدرّج
+
+في لوحة متجر Chrome، عند إرسال إصدار جديد: **Distribution ← Percentage rollout** (يظهر بعد أول نشر عام)
+وابدأ بـ 10%، راقب سجل الأخطاء وتقييمات المستخدمين وتبويب التكاليف يومين، ثم ارفع إلى 50% ثم 100%. للتراجع
+ارفع الإصدار السابق برقم أعلى (المتجر لا يقبل رقمًا أقل).
+
 ## 4) بعد النشر
 
 * معرّف المتجر يختلف عن معرّف التطوير. لربط Infera Code:

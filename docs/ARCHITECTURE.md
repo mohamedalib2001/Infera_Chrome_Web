@@ -172,6 +172,21 @@ If an endpoint rejects the toolset, the session falls back to the classic tools 
 * **History** — the History drawer searches titles and contents (this browser and the account,
   `GET /api/browser-agent/conversations?q=`) and loads older pages on demand.
 
+## Infera Agent Desktop (work outside the browser)
+
+* **Browser → desktop** — tool `desktop_task`, offered (checked once per task) while Infera Agent Desktop is
+  running and linked: the extension sends `{type:"desktop_request", action:"task", prompt, context}` over
+  native messaging to the host the desktop registers (`com.infera.agent_browser_extension`); the host reads
+  the desktop bridge's port and per-launch token from `~/.infera/chrome/bridge.json` (0600, written by the
+  desktop when its bridge starts, removed when it stops) and calls `POST /bridge/desktop-task`. The desktop
+  shows the exact request in a dialog and runs it as a desktop task only if the person allows it, then
+  answers with the task's status and final text (`desktop_response`). Chrome's `allowed_origins` limits the
+  host to this extension; the token keeps other local processes out of the bridge.
+* **Desktop → browser** — unchanged: the desktop's agent drives this extension as `browser__*` tools through
+  the bundled MCP server and the native host.
+* The native host is shared: `native-host/` here is the source, the desktop vendors a copy in
+  `resources/native-host`. Its default `allowed_origins` are the store and development extension IDs.
+
 ## Inside the Infera Agent account
 
 * **One memory with the app** — `GET /api/browser-agent/memory` also returns what the app's agent remembered

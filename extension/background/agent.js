@@ -6,7 +6,8 @@
 //               language, we execute the batch, then send a fresh screenshot.
 import { streamMessage, modelInfo } from './llm.js';
 import { executeTool } from './tools/executor.js';
-import { PANEL_TOOLS, MEMORY_TOOLS, ALL_TABS_TOOLS, TASK_TOOLS, WORK_TOOLS, TOOL_BY_NAME } from './tools/definitions.js';
+import { PANEL_TOOLS, MEMORY_TOOLS, ALL_TABS_TOOLS, TASK_TOOLS, WORK_TOOLS, DESKTOP_TOOLS, TOOL_BY_NAME } from './tools/definitions.js';
+import { nativeBridge } from './native-bridge.js';
 import { webTools, SERVER_RESULT_TYPES, summarizeServerResult, citedSources } from './tools/web-tools.js';
 import { listMemory, memoryBlock } from './memory.js';
 import { inferaConversations } from './auth.js';
@@ -403,6 +404,8 @@ export class AgentSession {
     const remoteDefs = remote.map(({ _server, _tool, ...t }) => t); // eslint-disable-line no-unused-vars
     const useWeb = () => !!modelInfo(model).browser && settings.webResearch !== false && !this.noWebTools;
     const work = WORK_TOOLS.filter((t) => t.name !== 'delegate_tasks' || this.depth === 0);
+    // The desktop agent, while Infera Agent Desktop is running (checked once per task, so the tool list stays stable).
+    if (this.depth === 0 && await nativeBridge.desktopReady().catch(() => false)) work.push(...DESKTOP_TOOLS);
     const extras = () => [...(settings.allTabsAccess !== false ? ALL_TABS_TOOLS : []), ...(settings.memory !== false ? MEMORY_TOOLS : []), ...TASK_TOOLS, ...work, ...remoteDefs];
     const toolList = (ts) => [
       ...(ts ? [BROWSER_TOOLSET] : []),

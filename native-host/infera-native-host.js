@@ -10,7 +10,8 @@
 //   3. routes tool_request / tool_response between MCP clients and the extension.
 const net = require('net');
 const fs = require('fs');
-const { socketDir, socketPathFor, lineReader, log } = require('./lib/common');
+const http = require('http');
+const { socketDir, socketPathFor, lineReader, log, BRIDGE_FILE } = require('./lib/common');
 
 const MAX_MESSAGE = 64 * 1024 * 1024; // extension -> host limit
 const CHUNK = 768 * 1024;             // host -> extension messages are limited to 1 MB: larger ones are chunked
@@ -65,8 +66,54 @@ function onExtensionMessage(msg) {
     case 'tools':
       route(msg);
       break;
+    case 'desktop_request':
+      desktopRequest(msg).then((r) => toExtension({ type: 'desktop_response', id: msg.id, ...r }));
+      break;
     default: log('ext ->', msg.type);
   }
+}
+
+// ---------- requests from the extension to Infera Agent Desktop ----------
+// The desktop app writes its local bridge's port and per-launch token to BRIDGE_FILE;
+// this host (started by Chrome for the extension, whose origin Chrome has already
+// checked) passes the request on. The desktop asks the person before it acts.
+function bridgeInfo() {
+  try {
+    const b = JSON.parse(fs.readFileSync(BRIDGE_FILE, 'utf8'));
+    return b && b.port && b.token ? b : null;
+  } catch { return null; }
+}
+
+function bridgeCall(b, method, path, body, timeoutMs) {
+  return new Promise((resolve) => {
+    const data = body ? Buffer.from(JSON.stringify(body)) : null;
+    const req = http.request({ host: '127.0.0.1', port: b.port, method, path, timeout: timeoutMs,
+      headers: { 'x-infera-bridge-token': b.token, ...(data ? { 'content-type': 'application/json', 'content-length': data.length } : {}) } }, (res) => {
+      let text = '';
+      res.on('data', (c) => { text += c; });
+      res.on('end', () => {
+        let j = null;
+        try { j = JSON.parse(text); } catch { /* not JSON */ }
+        resolve(j && typeof j === 'object' ? { status: res.statusCode, ...j } : { ok: false, error: `Desktop answered ${res.statusCode}` });
+      });
+    });
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: 'Infera Agent Desktop did not answer in time.' }); });
+    req.on('error', () => resolve({ ok: false, error: 'Infera Agent Desktop is not running.' }));
+    if (data) req.write(data);
+    req.end();
+  });
+}
+
+async function desktopRequest(msg) {
+  const b = bridgeInfo();
+  if (!b) return { ok: false, error: 'Infera Agent Desktop is not running (or is an older version without the Chrome link).' };
+  if (msg.action === 'ping') return bridgeCall(b, 'GET', '/bridge/ping', null, 5000);
+  if (msg.action === 'task') {
+    const prompt = String(msg.prompt || '').slice(0, 8000);
+    if (!prompt.trim()) return { ok: false, error: 'No task given.' };
+    return bridgeCall(b, 'POST', '/bridge/desktop-task', { prompt, from: 'chrome', context: String(msg.context || '').slice(0, 4000) }, 30 * 60_000);
+  }
+  return { ok: false, error: `Unknown desktop action ${msg.action}` };
 }
 
 function route(msg) {

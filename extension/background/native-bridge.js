@@ -26,6 +26,32 @@ class NativeBridge {
     return { state: this.state, host: this.host, lastError: this.lastError, clients: [...mcpClients.entries()].map(([id, c]) => ({ id, ...c })) };
   }
 
+  // ---------- requests to Infera Agent Desktop (through its native host) ----------
+  #request(payload, timeoutMs) {
+    if (this.state !== 'connected' || this.host !== NATIVE_HOSTS[0]) return Promise.resolve({ ok: false, error: 'Infera Agent Desktop is not connected.' });
+    const id = `d${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    this.waiting ||= new Map();
+    return new Promise((resolve) => {
+      const t = setTimeout(() => { this.waiting.delete(id); resolve({ ok: false, error: 'Infera Agent Desktop did not answer in time.' }); }, timeoutMs);
+      this.waiting.set(id, (r) => { clearTimeout(t); resolve(r); });
+      this.#send({ type: 'desktop_request', id, ...payload });
+    });
+  }
+
+  /** Whether Infera Agent Desktop is running and signed in (cached for a minute). */
+  async desktopReady() {
+    if (this.state !== 'connected' || this.host !== NATIVE_HOSTS[0]) return false;
+    if (this.desktopSeen && Date.now() - this.desktopSeen.at < 60_000) return this.desktopSeen.ok;
+    const r = await this.#request({ action: 'ping' }, 6000);
+    this.desktopSeen = { at: Date.now(), ok: !!(r.ok && r.product === 'infera-agents-desktop') };
+    return this.desktopSeen.ok;
+  }
+
+  /** Hands a task outside the browser to the desktop agent; the desktop asks the person first. */
+  desktopTask(prompt, context = '') {
+    return this.#request({ action: 'task', prompt, context }, 31 * 60_000);
+  }
+
   async connect() {
     if (this.state === 'connecting' || this.state === 'connected') return;
     this.state = 'connecting';
@@ -111,6 +137,7 @@ class NativeBridge {
       try { m = JSON.parse(c.parts.join('')); } catch { return; }
     }
     switch (m?.type) {
+      case 'desktop_response': { const fn = this.waiting?.get(m.id); if (fn) { this.waiting.delete(m.id); fn(m); } break; }
       case 'ping': this.#send({ type: 'pong' }); break;
       case 'get_status': this.#send({ type: 'status', id: m.id, extensionId: chrome.runtime.id, version: VERSION, ...this.status() }); break;
       case 'list_tools': this.#send({ type: 'tools', id: m.id, tools: listMcpTools() }); break;

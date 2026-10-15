@@ -6,7 +6,11 @@ const fs = require('fs');
 
 const HOST_CODE = 'com.infera.agent_code_browser_extension';
 const HOST_DESKTOP = 'com.infera.agent_browser_extension';
-const DEFAULT_EXTENSION_ID = 'cginklpeajfbmijnfoegocimhaagbbll';
+// The published Chrome Web Store build and the development build.
+const STORE_EXTENSION_ID = 'nablmcconmoblabfpbcfaplmbijmgdjc';
+const DEFAULT_EXTENSION_ID = `${STORE_EXTENSION_ID},cginklpeajfbmijnfoegocimhaagbbll`;
+// Where Infera Agent Desktop leaves the address and per-launch token of its local bridge (0600).
+const BRIDGE_FILE = process.env.INFERA_BRIDGE_FILE || path.join(os.homedir(), '.infera', 'chrome', 'bridge.json');
 const MCP_SERVER_NAME = 'infera-in-chrome';
 
 function userName() {
@@ -55,4 +59,4 @@ function log(...a) {
   if (process.env.INFERA_DEBUG) process.stderr.write(`[infera] ${a.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(' ')}\n`);
 }
 
-module.exports = { HOST_CODE, HOST_DESKTOP, DEFAULT_EXTENSION_ID, MCP_SERVER_NAME, socketDir, socketPathFor, listSockets, lineReader, log };
+module.exports = { HOST_CODE, HOST_DESKTOP, DEFAULT_EXTENSION_ID, STORE_EXTENSION_ID, BRIDGE_FILE, MCP_SERVER_NAME, socketDir, socketPathFor, listSockets, lineReader, log };
