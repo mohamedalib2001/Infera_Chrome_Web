@@ -25,7 +25,7 @@ const L = {
     memoryOn: 'Long-term memory: remember the preferences you share, for future conversations',
     allTabs: 'Whole browser: the agent can see, close and take over any open tab (not only its own group)',
     sync: 'Save my conversations in my Infera Agent account (history on all my devices; screenshots are not saved; kept 90 days)',
-    memory: 'Memory', memoryHint: 'Things you asked the agent to remember. They stay in this browser and are shown to the agent at the start of each new conversation.',
+    memory: 'Memory', memoryHint: 'Things you asked the agent to remember, kept in your Infera Agent account so they follow you to every device. The newest and pinned ones are shown to the agent at the start of each conversation; it searches the rest when a task needs them.', memoryCount: '{n} of {max} memories', memorySearch: 'Search memories…', pinned: 'Pinned',
     noMemory: 'Nothing saved yet. Tell the agent "remember that…" to add something.', clearMemory: 'Forget everything', clearMemoryQ: 'Delete all memories?',
     sites: 'Your approved sites', sitesHint: 'Sites where you chose "Always allow". Entries are integrity-protected; tampered entries are ignored.',
     site: 'Site', since: 'Approved', status: 'Status', revoke: 'Revoke', revokeAll: 'Revoke all', none: 'No approved sites yet.', valid: 'valid', tampered: 'tampered (ignored)',
@@ -48,7 +48,7 @@ const L = {
     memoryOn: 'الذاكرة الدائمة: تذكّر التفضيلات التي تشاركها في المحادثات القادمة',
     allTabs: 'المتصفح كاملًا: يستطيع الوكيل رؤية أي تبويب مفتوح وإغلاقه والعمل عليه (وليس مجموعته فقط)',
     sync: 'حفظ محادثاتي في حسابي على إنفرا إيجنت (السجل على كل أجهزتي؛ لا تُحفظ لقطات الشاشة؛ تُحفظ 90 يومًا)',
-    memory: 'الذاكرة', memoryHint: 'ما طلبت من الوكيل أن يتذكره. تبقى في هذا المتصفح وتُعرض على الوكيل في بداية كل محادثة جديدة.',
+    memory: 'الذاكرة', memoryHint: 'ما طلبت من الوكيل أن يتذكره، محفوظ في حسابك على Infera Agent فيرافقك على كل أجهزتك. يرى الوكيل الأحدث والمثبّت منها في بداية كل محادثة، ويبحث في الباقي عندما تحتاجه المهمة.', memoryCount: '{n} من {max} ذكرى', memorySearch: 'ابحث في الذاكرة…', pinned: 'مثبّتة',
     noMemory: 'لا يوجد شيء محفوظ بعد. قل للوكيل «تذكّر أن…» لإضافة شيء.', clearMemory: 'نسيان كل شيء', clearMemoryQ: 'حذف كل الذكريات؟',
     sites: 'المواقع التي وافقت عليها', sitesHint: 'المواقع التي اخترت فيها «السماح دائمًا». الإدخالات محمية بتوقيع سلامة، وأي إدخال معدَّل يُتجاهل.',
     site: 'الموقع', since: 'تاريخ الموافقة', status: 'الحالة', revoke: 'إلغاء', revokeAll: 'إلغاء الكل', none: 'لا توجد مواقع موافق عليها بعد.', valid: 'سليم', tampered: 'معدَّل (متجاهَل)',
@@ -140,12 +140,21 @@ async function render() {
 
   // Long-term memory
   const memories = await send('list_memory');
+  const memRow = (m) => el('tr', {},
+    el('td', {}, m.pinned ? el('span', { title: tr('pinned') }, '★ ') : null, m.text, m.topic ? el('span', { class: 'muted' }, ` · ${m.topic}`) : null),
+    el('td', { class: 'muted', style: 'white-space:nowrap' }, new Date(m.updatedAt || m.createdAt).toLocaleDateString()),
+    el('td', {}, el('button', { class: 'btn', onclick: async () => { await send('forget_memory', { id: m.id }); render(); } }, tr('remove'))));
+  const memBody = el('tbody', {}, ...memories.slice(0, 200).map(memRow));
+  const memFilter = el('input', { type: 'search', placeholder: tr('memorySearch'), style: 'width:100%;margin:8px 0', oninput: () => {
+    const q = memFilter.value.trim().toLowerCase();
+    memBody.replaceChildren(...memories.filter((m) => !q || `${m.text} ${m.topic || ''}`.toLowerCase().includes(q)).slice(0, 200).map(memRow));
+  } });
   app.append(el('section', { class: 'card' },
     el('h2', {}, tr('memory')), el('p', { class: 'muted' }, tr('memoryHint')),
+    memories.length ? el('p', { class: 'muted' }, tr('memoryCount').replace('{n}', memories.length).replace('{max}', 2000)) : null,
+    memories.length > 5 ? memFilter : null,
     memories.length
-      ? el('table', {}, el('tbody', {}, ...memories.map((m) => el('tr', {},
-        el('td', {}, m.text), el('td', { class: 'muted', style: 'white-space:nowrap' }, new Date(m.createdAt).toLocaleDateString()),
-        el('td', {}, el('button', { class: 'btn', onclick: async () => { await send('forget_memory', { id: m.id }); render(); } }, tr('remove')))))))
+      ? el('table', {}, memBody)
       : el('p', { class: 'muted' }, tr('noMemory')),
     memories.length ? el('div', { class: 'actions' }, el('button', { class: 'btn', onclick: async () => { if (confirm(tr('clearMemoryQ'))) { await send('clear_memory'); render(); } } }, tr('clearMemory'))) : null));
 

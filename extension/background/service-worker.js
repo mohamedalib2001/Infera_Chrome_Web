@@ -295,7 +295,7 @@ async function handleMessage(msg, sender) {
     case 'infera_sign_in': return inferaSignIn();
     case 'refresh_account': return refreshInferaAccount();
     case 'classify': return classifyUrl(msg.url);
-    case 'list_memory': return listMemory();
+    case 'list_memory': return listMemory({ fresh: true });
     case 'forget_memory': await forgetMemory(msg.id); return listMemory();
     case 'clear_memory': await clearMemory(); return [];
     case 'list_mcp_servers': return listServers();
@@ -402,4 +402,6 @@ self.__infera = {
   AgentSession, executeTool, tabGroups, permissions, sessions, sessionForWindow, nativeBridge, classifyUrl, getSettings, updateSettings,
   // A side-panel message without a panel (tests).
   panelCall: async (windowId, msg) => handlePanel(msg, await sessionForWindow(windowId), { postMessage() {} }),
+  // A settings-page message (tests).
+  optionsCall: (msg) => handleMessage(msg, {}),
 };

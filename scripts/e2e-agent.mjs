@@ -41,6 +41,19 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
+  if (req.url.startsWith('/api/browser-agent/memory')) {
+    const mem = (globalThis.MEM ||= new Map());
+    const id = decodeURIComponent(req.url.split('/')[4] || '');
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      if (req.method === 'PUT') { const m = { ...JSON.parse(body), id, updatedAt: Date.now() }; mem.set(id, m); return res.end(JSON.stringify(m)); }
+      if (req.method === 'DELETE') { if (id === 'all') mem.clear(); else mem.delete(id); return res.end('{"ok":true}'); }
+      res.end(JSON.stringify([...mem.values()]));
+    });
+    return;
+  }
   if (req.url.startsWith('/api/browser-agent/limits')) {
     let body = '';
     req.on('data', (c) => { body += c; });
@@ -148,6 +161,33 @@ const server = http.createServer((req, res) => {
           { type: 'content_block_stop', index: 0 },
           { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5 } }, { type: 'message_stop' },
           { type: 'infera_usage', amount: 0.4, currency: 'SAR', balance: 20, charged: true }]);
+      }
+      if (phase === 'compact') {
+        // A long task: a note, then the server summarizes the history, then the end.
+        const tu = (index, id, name, input) => [
+          { type: 'content_block_start', index, content_block: { type: 'tool_use', id, name, input: {} } },
+          { type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: JSON.stringify(input) } },
+          { type: 'content_block_stop', index },
+        ];
+        const k = j.messages.filter((m) => m.role === 'assistant').length;
+        const summarized = j.messages.some((m) => Array.isArray(m.content) && m.content.some((b) => b.type === 'compaction'));
+        if (!summarized && k === 0) {
+          return sse(res, [start('c1'), ...tu(0, 'tn_1', 'task_notes', { action: 'append', text: 'Price at shop A: 10 SAR' }),
+            { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }]);
+        }
+        if (!summarized) {
+          return sse(res, [start('c2'),
+            { type: 'content_block_start', index: 0, content_block: { type: 'compaction', content: null } },
+            { type: 'content_block_delta', index: 0, delta: { type: 'compaction_delta', content: '<summary>Goal: compare prices. Shop A done.</summary>' } },
+            { type: 'content_block_stop', index: 0 },
+            ...tu(1, 'tn_2', 'task_notes', { action: 'read' }),
+            { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5, iterations: [{ type: 'compaction', input_tokens: 260000, output_tokens: 900 }] } }, { type: 'message_stop' }]);
+        }
+        return sse(res, [start('c3'),
+          { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+          { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Shop A is cheapest.' } },
+          { type: 'content_block_stop', index: 0 },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }]);
       }
       if (phase === 'web' || phase === 'plain') {
         const tu = (index, id, name, input, toolset = false) => [
@@ -278,11 +318,12 @@ check('adaptive thinking + effort (medium by default)', requests[0].body.thinkin
 const lastBlock = (b) => b.messages.at(-1).content.at(-1);
 check('history cached: breakpoint on the newest message only', !!lastBlock(requests[1].body).cache_control && !requests[1].body.messages[0].content.some((c) => c.cache_control));
 const cm = requests[0].body.context_management?.edits?.[0];
-check('old tool results cleared rarely and in big steps', cm?.trigger?.value === 120000 && cm?.clear_at_least?.value === 40000 && cm?.keep?.value === 4);
+check('long history: summarized on the server at 250k tokens (compaction), output up to 128k', cm?.type === 'compact_20260112' && cm?.trigger?.value === 250000 && /Do not call any tools/.test(cm?.instructions || '')
+  && String(requests[0].headers['anthropic-beta']).includes('compact-2026-01-12') && requests[0].body.max_tokens === 128000, JSON.stringify(cm).slice(0, 200));
 check('task named for the cost log', decodeURIComponent(requests[0].headers['x-infera-task'] || '') === 'What is on this page?');
 const t0 = requests[0].body.tools;
 check('tools: web search/fetch first, own tools w/ eager streaming, memory, cache_control',
-  t0.length === 28 && t0[0].type === 'web_search_20260318' && t0[0].response_inclusion === 'excluded' && t0[1].type === 'web_fetch_20260318'
+  t0.length === 30 && t0.some((t) => t.name === 'task_notes') && t0.some((t) => t.name === 'memory_search') && t0[0].type === 'web_search_20260318' && t0[0].response_inclusion === 'excluded' && t0[1].type === 'web_fetch_20260318'
   && !t0[0].eager_input_streaming && t0[2].eager_input_streaming === true && t0.some((t) => t.name === 'memory_save') && t0.some((t) => t.name === 'all_tabs') && !!t0.at(-1).cache_control,
   t0.map((t) => t.name || t.type).join(','));
 check('tab context in first user msg', JSON.stringify(requests[0].body.messages[0]).includes('<tab_context>'));
@@ -565,6 +606,54 @@ const starts = await mic.evaluate(() => globalThis.__starts);
 check('microphone refused: one settings tab, no restart loop', micTabs === 1 && starts === 1, `tabs=${micTabs} starts=${starts}`);
 for (const pg of ctx.pages()) if (pg.url().includes('options/options.html')) await pg.close();
 await mic.close();
+// A long task: the history is summarized on the server, the notebook comes back
+// word for word, and only the summary onward is sent.
+requests.length = 0;
+phase = 'compact';
+const long = await sw.evaluate(async ({ tabId }) => {
+  const s = new self.__infera.AgentSession({ kind: 'panel' });
+  s.classicTools = true;
+  s.modelOverride = 'claude-opus-5-5';
+  const events = [];
+  s.subscribe((e) => { if (e.type === 'compacted') events.push(e); });
+  await s.run('Compare the prices', { startTabId: tabId });
+  return { status: s.status, notes: s.notes, compactions: s.compactions, events: events.length, last: s.messages.at(-1)?.content?.[0]?.text };
+}, { tabId });
+const c3 = requests.at(-1)?.body;
+check('long task: summarized and goes on', long.status === 'done' && long.compactions === 1 && long.events === 1 && long.last === 'Shop A is cheapest.', JSON.stringify(long));
+check('long task: only the summary onward is sent, notebook handed back', c3?.messages[0]?.role === 'assistant' && c3.messages[0].content[0].type === 'compaction'
+  && JSON.stringify(c3.messages.at(-1)).includes('<task_notes>') && JSON.stringify(c3.messages.at(-1)).includes('Price at shop A: 10 SAR'), JSON.stringify(c3?.messages || []).slice(0, 500));
+
+// A task cut off mid-step (browser closed) continues cleanly from the history.
+const resumed = await sw.evaluate(() => {
+  const s = self.__infera.AgentSession.fromHistory({ id: 'cut-1', title: 'cut', messages: [
+    { role: 'user', content: [{ type: 'text', text: 'do it' }] },
+    { role: 'assistant', content: [{ type: 'tool_use', id: 'tu_cut', name: 'computer', input: { action: 'screenshot' } }] }] }, null);
+  return { status: s.status, last: s.messages.at(-1) };
+});
+check('interrupted task: open step closed, ready to continue', resumed.status === 'stopped' && resumed.last.role === 'user' && resumed.last.content[0].tool_use_id === 'tu_cut' && resumed.last.content[0].is_error === true, JSON.stringify(resumed).slice(0, 300));
+
+// Long-term memory lives in the account: saved there, searched, and the newest
+// and pinned are shown first; the rest are announced for memory_search.
+const memo = await sw.evaluate(async () => {
+  const I = self.__infera;
+  const ctx = { memoryEnabled: true, sessionId: 'mem', mode: 'skip_all_permission_checks' };
+  const saved = await I.executeTool('memory_save', { text: 'Company: Infera Engine Ltd, London', topic: 'work', pinned: true }, ctx, { internal: true });
+  const found = await I.executeTool('memory_search', { query: 'infera london' }, ctx, { internal: true });
+  return { saved: saved.content[0].text, found: found.content[0].text, isError: !!found.isError };
+});
+const inAccount = [...(globalThis.MEM?.values() || [])];
+check('memory: saved in the account with topic and pin', inAccount.some((m) => m.text === 'Company: Infera Engine Ltd, London' && m.topic === 'work' && m.pinned === true), JSON.stringify(inAccount).slice(0, 300));
+check('memory: memory_search finds it', !memo.isError && memo.found.includes('Infera Engine Ltd'), JSON.stringify(memo));
+for (let i = 0; i < 40; i++) globalThis.MEM.set(`m_bulk${i}`, { id: `m_bulk${i}`, text: `Note ${i} ${'x'.repeat(1500)}`, topic: '', pinned: false, createdAt: i, updatedAt: i });
+const memList = await sw.evaluate(() => self.__infera.optionsCall({ type: 'list_memory' }));
+requests.length = 0;
+phase = 'plain';
+await run('claude-opus-5-5', { classic: false });
+const firstMsg = JSON.stringify(requests[0]?.body.messages[0] || {});
+check('memory: pinned first, older ones left to memory_search', memList.length >= 41 && memList[0].pinned === true && firstMsg.includes('Infera Engine Ltd') && firstMsg.includes('older memories are not shown'), `${memList.length} ${firstMsg.length}`);
+phase = 'normal';
+
 const op = await ctx.newPage();
 await op.setViewportSize({ width: 900, height: 1200 });
 op.on('pageerror', (e) => pageErrors.push(e.message));

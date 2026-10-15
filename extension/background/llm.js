@@ -18,6 +18,20 @@ export function baseModelId(id) {
   return id.replace(/\[fast\]$/, '');
 }
 
+// Compaction starts when a request's history reaches this many tokens (of a
+// 1M-token window): late enough to keep a long task's detail, early enough that
+// each step stays affordable.
+export const COMPACT_TRIGGER = 250_000;
+const COMPACT_INSTRUCTIONS = `You are writing a handover summary of this browser-agent session so it can continue in a fresh context window with nothing else. Write it inside <summary></summary> tags, in the language of the user's messages.
+Include, in this order:
+1. The user's goal and every instruction, preference and constraint they gave (quote exact wording where it matters).
+2. What has been done, step by step, and the outcome of each step.
+3. Everything found that a later step may need: names, numbers, prices, dates, URLs, IDs, file names, tab IDs and what each tab shows, form values entered.
+4. Decisions made and why; anything that failed and what was learned.
+5. What remains to do, as a numbered list, and the very next step.
+6. Open questions for the user.
+Keep facts exact; do not invent anything. Do not call any tools while writing this summary; respond with text only.`;
+
 async function authHeaders(settings) {
   const h = {
     'content-type': 'application/json',
@@ -43,6 +57,12 @@ const CACHEABLE = new Set(['text', 'image', 'document', 'tool_result']);
 // - empty text blocks (e.g. a message that was only an attachment) are dropped.
 const blocksOf = (c) => (Array.isArray(c) ? c : [{ type: 'text', text: String(c ?? '') }]);
 function sanitizeMessages(messages) {
+  // A compaction summary stands for everything before it: send from the newest one
+  // (the API would ignore the earlier turns anyway). A failed one (no summary) is dropped.
+  messages = messages.map((m) => (Array.isArray(m.content) && m.content.some((b) => b.type === 'compaction' && !b.content)
+    ? { ...m, content: m.content.filter((b) => b.type !== 'compaction' || b.content) } : m));
+  const from = messages.findLastIndex((m) => Array.isArray(m.content) && m.content.some((b) => b.type === 'compaction'));
+  if (from > 0) messages = messages.slice(from);
   const merged = [];
   for (const m of messages) {
     const prev = merged[merged.length - 1];
@@ -77,7 +97,7 @@ function buildBody({ model, system, messages, tools, maxTokens, effort, quick, c
   const info = modelInfo(model);
   const id = baseModelId(model);
   const betas = [];
-  const body = { model: id, max_tokens: maxTokens ?? (stream ? 64000 : 16000), messages: stream ? withCachedTail(messages) : sanitizeMessages(messages), stream };
+  const body = { model: id, max_tokens: maxTokens ?? (stream ? (info.maxOutput || 128_000) : 16000), messages: stream ? withCachedTail(messages) : sanitizeMessages(messages), stream };
   if (system) body.system = system;
   // The code-execution container behind web search/fetch filtering, reused across turns.
   if (container) body.container = container;
@@ -112,7 +132,18 @@ function buildBody({ model, system, messages, tools, maxTokens, effort, quick, c
     body.fallbacks = 'default';
     betas.push('server-side-fallback-2026-07-01');
   }
-  if (!quick && !disabledFeatures.has('context_management')) {
+  if (!quick && info.compact && !disabledFeatures.has('compaction')) {
+    // Long tasks: when the history passes the trigger the server summarizes the
+    // older turns (keeping goals, findings and progress) and the task goes on, so a
+    // conversation has no practical length limit. The summary replaces what came
+    // before it; tool results are no longer cut one by one.
+    body.context_management = { edits: [{
+      type: 'compact_20260112',
+      trigger: { type: 'input_tokens', value: COMPACT_TRIGGER },
+      instructions: COMPACT_INSTRUCTIONS,
+    }] };
+    betas.push('compact-2026-01-12');
+  } else if (!quick && !disabledFeatures.has('context_management')) {
     // Old tool results are cleared only on a large history, and in big steps, so
     // the cached prefix isn't invalidated on every request.
     body.context_management = { edits: [{
@@ -128,6 +159,7 @@ function buildBody({ model, system, messages, tools, maxTokens, effort, quick, c
 
 function featureFromError(msg) {
   if (msg.includes('block_binding') || msg.includes('thinking-binding-controls')) return 'block_binding';
+  if (/compact/i.test(msg)) return 'compaction';
   for (const f of ['fallbacks', 'context_management', 'eager_input_streaming', 'speed', 'output_config']) {
     if (msg.includes(f)) return f;
   }
@@ -216,6 +248,7 @@ export async function streamMessage(params, { signal, onEvent = () => {} } = {})
         else if (d.type === 'signature_delta') { b.signature = (b.signature || '') + d.signature; }
         else if (d.type === 'input_json_delta') { partialJson[data.index] += d.partial_json; }
         else if (d.type === 'citations_delta') { (b.citations ||= []).push(d.citation); }
+        else if (d.type === 'compaction_delta') { b.content = (b.content || '') + (d.content || ''); }
         break;
       }
       case 'content_block_stop': {

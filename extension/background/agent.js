@@ -6,7 +6,7 @@
 //               language, we execute the batch, then send a fresh screenshot.
 import { streamMessage, modelInfo } from './llm.js';
 import { executeTool } from './tools/executor.js';
-import { PANEL_TOOLS, MEMORY_TOOLS, ALL_TABS_TOOLS, TOOL_BY_NAME } from './tools/definitions.js';
+import { PANEL_TOOLS, MEMORY_TOOLS, ALL_TABS_TOOLS, TASK_TOOLS, TOOL_BY_NAME } from './tools/definitions.js';
 import { webTools, SERVER_RESULT_TYPES, summarizeServerResult, citedSources } from './tools/web-tools.js';
 import { listMemory, memoryBlock } from './memory.js';
 import { inferaConversations } from './auth.js';
@@ -29,7 +29,13 @@ import { playSound } from './offscreen-client.js';
 import { popupApproval } from './approvals.js';
 import { remoteTools, callRemoteTool } from './remote-mcp.js';
 
-const MAX_TURNS = 200;
+// A safety net only: long tasks are bounded by the per-task spending limit the
+// user approves, and their history is compacted on the server as it grows.
+const MAX_TURNS = 5000;
+// The task notebook (task_notes) holds at most this much text.
+const NOTES_MAX = 30_000;
+// Larger conversations are kept in the account from their latest summary on.
+const ACCOUNT_COPY_MAX = 4 * 1024 * 1024;
 const HISTORY_LIMIT = 50;
 
 export class AgentSession {
@@ -54,6 +60,8 @@ export class AgentSession {
     this.queue = [];             // messages the user sent while a task was running
     this.cost = 0;               // what this conversation has cost, in the account currency
     this.currency = '';
+    this.notes = '';             // the task notebook (task_notes): survives compaction
+    this.compactions = 0;
   }
 
   // ---------- UI plumbing ----------
@@ -167,6 +175,7 @@ export class AgentSession {
           if (mem) content.push(mem);
         }
         content.push(...this.#attachmentBlocks(attachments));
+        if (this.notesPending) content.push(this.#notesBlock());
         content.push({ type: 'text', text: userText || '(The user sent only the attached files.)' });
         this.messages.push({ role: 'user', content });
         await this.#loop({ model, mode, settings, toolset, policy });
@@ -385,7 +394,7 @@ export class AgentSession {
     const remoteByName = new Map(remote.map((t) => [t.name, t]));
     const remoteDefs = remote.map(({ _server, _tool, ...t }) => t); // eslint-disable-line no-unused-vars
     const useWeb = () => !!modelInfo(model).browser && settings.webResearch !== false && !this.noWebTools;
-    const extras = () => [...(settings.allTabsAccess !== false ? ALL_TABS_TOOLS : []), ...(settings.memory !== false ? MEMORY_TOOLS : []), ...remoteDefs];
+    const extras = () => [...(settings.allTabsAccess !== false ? ALL_TABS_TOOLS : []), ...(settings.memory !== false ? MEMORY_TOOLS : []), ...TASK_TOOLS, ...remoteDefs];
     const toolList = (ts) => [
       ...(ts ? [BROWSER_TOOLSET] : []),
       ...(useWeb() ? webTools(settings, policy) : []),
@@ -437,6 +446,14 @@ export class AgentSession {
       if (paused && last?.role === 'assistant') last.content = [...last.content, ...clean];
       else this.messages.push({ role: 'assistant', content: clean });
       paused = msg.stop_reason === 'pause_turn';
+      const summarized = clean.some((b) => b.type === 'compaction' && b.content);
+      if (summarized) {
+        this.compactions++;
+        if (this.notes) this.notesPending = true;
+        this.emit({ type: 'compacted', summarized: true, count: this.compactions });
+      }
+      // Saved along the way too, so a long task survives the browser closing.
+      if (turn % 10 === 9) await this.#persist();
 
       if (msg.stop_reason === 'refusal') {
         this.emit({ type: 'error', message: `The model declined this request${msg.stop_details?.explanation ? `: ${msg.stop_details.explanation}` : '.'}` });
@@ -475,6 +492,8 @@ export class AgentSession {
           if (r.isError) browserFailed = true;
         } else if (remoteByName.has(u.name)) {
           r = await this.#runRemote(remoteByName.get(u.name), u, mode, settings);
+        } else if (u.name === 'task_notes') {
+          r = this.#taskNotes(u.input);
         } else if (!TOOL_BY_NAME[u.name]) {
           r = { content: [{ type: 'text', text: `Unknown tool ${u.name}` }], isError: true };
         } else {
@@ -487,11 +506,27 @@ export class AgentSession {
       const note = this.#contextNote(mode, await tabGroups.tabs(this.id).catch(() => []));
       if (note) results.push({ type: 'text', text: note });
       if (this.queue.length) results.push(...this.#drainQueue());
+      // After a summary, the notebook is handed back word for word.
+      if (this.notesPending) results.push(this.#notesBlock());
       // All results in ONE user message.
       this.messages.push({ role: 'user', content: results });
       if (this.abort.signal.aborted) throw new DOMException('aborted', 'AbortError');
     }
     this.emit({ type: 'error', message: `Stopped after ${MAX_TURNS} steps.` });
+  }
+
+  #notesBlock() {
+    this.notesPending = false;
+    return { type: 'text', text: `<task_notes>\nYour task notebook, kept word for word across the summary:\n${this.notes}\n</task_notes>` };
+  }
+
+  #taskNotes(input) {
+    const t = String(input?.text ?? '');
+    if (input?.action === 'read') return { content: [{ type: 'text', text: this.notes || '(The notebook is empty.)' }] };
+    const next = input?.action === 'replace' ? t : (this.notes ? `${this.notes}\n${t}` : t);
+    if (next.length > NOTES_MAX) return { content: [{ type: 'text', text: `The notebook would be ${next.length} characters; keep it under ${NOTES_MAX}. Rewrite it shorter with action "replace".` }], isError: true };
+    this.notes = next;
+    return { content: [{ type: 'text', text: `Notebook saved (${next.length} characters).` }] };
   }
 
   async #runRemote(def, u, mode, settings) {
@@ -594,13 +629,13 @@ export class AgentSession {
       role: m.role,
       content: Array.isArray(m.content) ? m.content.map(stripForHistory) : m.content,
     }));
-    const entry = { id: this.id, title: this.title, kind: this.kind, createdAt: this.createdAt, updatedAt: Date.now(), status: this.status, messages: stripped, usage: this.usage, cost: this.cost, currency: this.currency };
+    const entry = { id: this.id, title: this.title, kind: this.kind, createdAt: this.createdAt, updatedAt: Date.now(), status: this.status, messages: stripped, usage: this.usage, cost: this.cost, currency: this.currency, notes: this.notes, compactions: this.compactions };
     const next = [entry, ...all.filter((c) => c.id !== this.id)].slice(0, HISTORY_LIMIT);
     await setLocal(STORAGE_KEYS.CONVERSATIONS, next);
     // And in the person's INFERA Agent account, so the history follows them to every device.
     const settings = await getSettings();
     if (settings.syncHistory !== false) {
-      inferaConversations('put', this.id, { ...entry, model: this.lastModel || '', messages: capText(stripped) })
+      inferaConversations('put', this.id, { ...entry, model: this.lastModel || '', messages: accountCopy(capText(stripped)) })
         .catch((e) => console.warn('Infera: conversation not saved to the account:', e.message));
     }
   }
@@ -615,8 +650,26 @@ export class AgentSession {
     s.currency = entry.currency || '';
     s.task = entry.title;
     s.status = 'idle';
+    s.notes = entry.notes || '';
+    s.compactions = entry.compactions || 0;
+    // A task cut off mid-step (the browser closed, the worker stopped): close its
+    // open tool calls so the conversation can simply go on ("continue").
+    const last = s.messages[s.messages.length - 1];
+    const open = last?.role === 'assistant' && Array.isArray(last.content) ? last.content.filter((b) => b.type === 'tool_use') : [];
+    if (open.length) {
+      s.messages.push({ role: 'user', content: [...open.map((u) => errorResult(u, 'Not run: the task was interrupted (the browser closed or restarted).')),
+        { type: 'text', text: 'The task was interrupted here. When the user asks you to continue, check the current state of the tabs first, then carry on from where you stopped.' }] });
+      s.status = 'stopped';
+    }
     return s;
   }
+}
+
+// The account copy of a very large conversation starts at its latest summary.
+function accountCopy(messages) {
+  if (JSON.stringify(messages).length <= ACCOUNT_COPY_MAX) return messages;
+  const from = messages.findLastIndex((m) => Array.isArray(m.content) && m.content.some((b) => b.type === 'compaction'));
+  return from > 0 ? messages.slice(from) : messages;
 }
 
 // Very long page texts are shortened in the account copy (the steps stay complete).

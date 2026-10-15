@@ -18,8 +18,12 @@ inferaagent.com (ثم إلى مزوّد النموذج) ما يلزم لفهم �
 * عند طلبك فقط (ما لم توقف الخيار «المتصفح كاملًا» في الإعدادات): قائمة كل التبويبات المفتوحة
   (العناوين والروابط) لإغلاقها أو العمل عليها.
 * محادثاتك مع الوكيل (نصّها وكل خطوة نفّذها، **بدون لقطات الشاشة والملفات المرفقة**) تُحفظ في
-  حسابك على inferaagent.com لتظهر على كل أجهزتك، وتُحذف تلقائيًا بعد 90 يومًا. يمكنك حذف أي محادثة
-  من السجل، أو إيقاف الحفظ في الحساب من الإعدادات.
+  حسابك على inferaagent.com لتظهر على كل أجهزتك، وتبقى حتى تحذفها أو حسب مدة الاحتفاظ التي تختارها
+  في إعدادات الخصوصية بحسابك. يمكنك حذف أي محادثة من السجل، أو إيقاف الحفظ في الحساب من الإعدادات.
+  في المهام الطويلة جدًا تُلخَّص الخطوات القديمة على الخادم لتستمر المهمة، ويُحفظ الملخص مع المحادثة.
+* الذاكرة الدائمة (ما طلبت من الوكيل تذكّره، حتى 2000 عنصر) تُحفظ في حسابك لتتبعك على كل أجهزتك.
+  لا تُحفظ فيها كلمات المرور أو الرموز أو أرقام البطاقات أبدًا، ويمكنك حذف أي عنصر منها أو حذفها كلها
+  من الإعدادات.
 * سجل التكاليف: لكل طلب للنموذج اسم المهمة والنموذج وعدد التوكنز والمبلغ.
 
 لا تعمل الإضافة في الخلفية دون مهمة منك أو مهمة مجدولة أنشأتها أنت.
@@ -27,7 +31,7 @@ inferaagent.com (ثم إلى مزوّد النموذج) ما يلزم لفهم �
 ## ما يبقى على جهازك
 
 الإعدادات، والمواقع الموافق عليها (موقّعة للتحقق من سلامتها)، والاختصارات، والمهام المجدولة،
-والذاكرة (ما طلبت من الوكيل تذكّره) ونسخة من سجل المحادثات — في تخزين المتصفح المحلي. يمكنك حذفها
+ونسخة من الذاكرة ومن سجل المحادثات — في تخزين المتصفح المحلي. يمكنك حذفها
 من الإعدادات، أو بإزالة الإضافة.
 
 ## ما لا نفعله
@@ -54,7 +58,11 @@ their titles/URLs, and (on request) console/network metadata with credentials re
 inferaagent.com and its model provider, only to perform the task you asked for. When you ask, it can
 list, close or take over any open tab (setting "Whole browser"). Your conversations — text and every
 step, **without screenshots or attached files** — are saved in your inferaagent.com account so they
-appear on all your devices, and are deleted after 90 days; you can delete any conversation or turn this
-off in Settings. Each model call is logged with the task name, model, tokens and amount for your cost
-log. Settings, approved sites, shortcuts, schedules and memory stay in local browser storage. We do not
+appear on all your devices, and are kept until you delete them or as set by the data-retention setting in
+your account; you can delete any conversation or turn this off in Settings. Very long tasks have their
+older steps summarized on the server so they can continue; the summary is saved with the conversation.
+Long-term memory (what you asked the agent to remember, up to 2,000 items; never passwords, codes or
+card numbers) is kept in your account so it follows you to every device; you can delete any item or all
+of them in Settings. Each model call is logged with the task name, model, tokens and amount for your cost
+log. Settings, approved sites, shortcuts and schedules stay in local browser storage. We do not
 sell data or use it for advertising; the model provider key never reaches the browser.

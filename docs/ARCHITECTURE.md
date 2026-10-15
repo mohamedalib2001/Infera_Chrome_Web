@@ -123,11 +123,29 @@ If an endpoint rejects the toolset, the session falls back to the classic tools 
   `*_tool_result` blocks are replayed unchanged, the code-execution `container` id is sent back on the
   next request, searches show as tool cards, and cited sources are listed under the answer.
   Setting: `webResearch`.
-* **Memory** — `memory.js`, tools `memory_save` / `memory_forget`. Short facts the user asked to be
-  remembered, stored in `chrome.storage.local` (`userMemory`, ≤100 items, ≤500 chars); passwords,
-  codes, card numbers and keys are refused. They are added to the first message of each new
-  conversation as `<user_memory>`; Settings lists them with Remove / Forget everything. Setting:
-  `memory`.
+* **Memory** — `memory.js`, tools `memory_save` (text, topic, pinned) / `memory_search` /
+  `memory_forget`. Lasting facts the user asked to be remembered, kept in the person's account
+  (`/api/browser-agent/memory`, ≤2000 items, ≤2000 chars; the server refuses secrets too) with a copy in
+  `chrome.storage.local` (`userMemory`) for when the account can't be reached; memories saved before
+  account sync are uploaded once. Pinned and newest memories (up to ~24k characters) go into the first
+  message of each new conversation as `<user_memory>`; the rest are announced and found with
+  `memory_search`. Settings lists them with search, Remove and Forget everything. Setting: `memory`.
+
+## Long tasks
+
+* **Compaction** (`llm.js`): on models that support it (Opus 5.5, Opus 5, Fable 5.1, Sonnet 5) requests
+  carry `context_management` `compact_20260112` (beta `compact-2026-01-12`) with a 250k-token trigger and
+  handover instructions; the server summarizes the older turns in a `compaction` block and the task
+  goes on. Requests are sent from the newest compaction block on; a failed (empty) one is dropped. If
+  the endpoint refuses compaction, the extension falls back to clearing old tool results. The gateway
+  charges the summary step from `usage.iterations`.
+* **Task notebook** — tool `task_notes` (append / replace / read, ≤30k chars), run in the agent loop and
+  saved with the conversation. After a compaction it is handed back word for word in `<task_notes>`.
+* **No fixed step limit** — `MAX_TURNS` is a 5000-step safety net; the per-task spending approval and the
+  daily limit bound a task. Output is up to 128k tokens per response (64k on Haiku 4.5).
+* **Interruptions** — the conversation is saved every 10 steps. A conversation restored with an
+  unfinished step has that step closed as interrupted, so "continue" carries on from there. Conversations
+  over 4 MB are saved to the account from their latest summary on.
 * **Attached files** — the side panel's paperclip attaches files from the device (10 MB total). Images
   are shown to the model, PDFs and text files are given to it as documents, and every file is listed
   in `<attached_files>` as `/attachments/<name>`: the browser toolset's `file_upload` (and the classic

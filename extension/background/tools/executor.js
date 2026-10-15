@@ -18,7 +18,7 @@ import { callPage, ensureInjected, overlay, waitForLoad } from '../page.js';
 import { gif } from '../gif.js';
 import { completeText, validateInput } from '../llm.js';
 import { listShortcuts, findShortcut } from '../shortcuts.js';
-import { saveMemory, forgetMemory } from '../memory.js';
+import { saveMemory, searchMemory, forgetMemory } from '../memory.js';
 import { TOOL_BY_NAME } from './definitions.js';
 import {
   PERMISSION_TYPES as P, PERMISSION_MODES, HELPER_MODEL, SCREENSHOT_TTL_MS, FIND_MAX_RESULTS, LOG_DEFAULT_LIMIT,
@@ -702,8 +702,15 @@ const impl = {
 
   async memory_save(ctx, input) {
     if (!ctx.memoryEnabled) fail('Memory is turned off in Settings.');
-    const m = await saveMemory(input.text);
+    const m = await saveMemory(input.text, { topic: input.topic, pinned: input.pinned });
     return ok(text(`Saved to memory as ${m.id}: ${m.text}`));
+  },
+
+  async memory_search(ctx, input) {
+    if (!ctx.memoryEnabled) fail('Memory is turned off in Settings.');
+    const found = await searchMemory(input.query);
+    if (!found.length) return ok(text(`Nothing in memory matches "${input.query}".`));
+    return ok(text(found.map((m) => `- [${m.id}]${m.topic ? ` (${m.topic})` : ''} ${m.text}`).join('\n')));
   },
 
   async memory_forget(ctx, input) {

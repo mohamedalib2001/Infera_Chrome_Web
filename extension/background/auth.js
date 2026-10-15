@@ -229,6 +229,21 @@ export async function inferaConversations(method, id, entry, retried = false) {
   }
 }
 
+// The person's long-term memory in their account: get (all), put (one), delete (one, or 'all').
+export async function inferaMemory(method, id, entry, retried = false) {
+  const a = await currentInfera();
+  if (!a) throw new Error('Not signed in.');
+  const url = `${a.server}/api/browser-agent/memory${id ? `/${encodeURIComponent(id)}` : ''}`;
+  try {
+    if (method === 'put') return await inferaFetch(url, { token: a.accessToken, method: 'PUT', body: entry });
+    if (method === 'delete') return await inferaFetch(url, { token: a.accessToken, method: 'DELETE' });
+    return await inferaFetch(url, { token: a.accessToken });
+  } catch (e) {
+    if (e.status === 401 && !retried && await refreshInferaToken(a)) return inferaMemory(method, id, entry, true);
+    throw e;
+  }
+}
+
 // Access token for other INFERA Agent services (the cloud relay).
 export async function getAccessToken() {
   return (await currentInfera())?.accessToken ?? null;

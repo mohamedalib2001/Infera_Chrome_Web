@@ -67,7 +67,7 @@ function onEvent(ev) {
     case 'plan_request': addPlan(ev.request); break;
     case 'error': addBanner(ev.message); break;
     case 'info': addBanner(ev.message, true); break;
-    case 'compacted': break;
+    case 'compacted': if (ev.summarized) addBanner(t('compacted'), true); break;
     case 'session_switched': call('state').then(loadState); break;
     case 'turn_end': curText = null; curThinking = null; refreshConversations(); break;
     default:
@@ -248,7 +248,7 @@ const TOOL_ICON = {
   new_tab: '+', list_tabs: '▭', switch_tab: '▭', close_tab: '×',
   // Server tools and memory
   web_search: '🔎', web_fetch: '↓', code_execution: '⚙', bash_code_execution: '⚙', text_editor_code_execution: '⚙',
-  memory_save: '★', memory_forget: '☆', all_tabs: '▦',
+  memory_save: '★', memory_forget: '☆', memory_search: '⌕', task_notes: '✎', all_tabs: '▦',
 };
 
 function targetText(tg) {
@@ -287,6 +287,8 @@ function toolSummary(name, i = {}) {
     case 'web_fetch': return String(i.url || '');
     case 'memory_save': return `“${String(i.text || '').slice(0, 60)}”`;
     case 'memory_forget': return String(i.id || '');
+    case 'memory_search': return `“${String(i.query || '').slice(0, 60)}”`;
+    case 'task_notes': return i.action || '';
     case 'all_tabs': return `${i.action}${i.match ? ` “${i.match}”` : i.duplicates ? ' duplicates' : i.tab_ids?.length ? ` ${i.tab_ids.length} tab(s)` : ''}`;
     default: return '';
   }
