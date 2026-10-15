@@ -15,7 +15,7 @@ export function modelInfo(id) {
 }
 
 export function baseModelId(id) {
-  return id.replace(/\[fast\]$/, '');
+  return id.replace(/\[(fast|advisor)\]$/, '');
 }
 
 // Compaction starts when a request's history reaches this many tokens (of a
@@ -107,6 +107,11 @@ function buildBody({ model, system, messages, tools, maxTokens, effort, quick, c
     body.stop_sequences = ['\n<<END>>'];
     if (info.fast && !disabledFeatures.has('speed')) { body.speed = 'fast'; betas.push('fast-mode-2026-02-01'); }
   } else if (tools?.length) {
+    // The advisor (a stronger model the executor consults) is a server tool of the request.
+    if (stream && info.advisor && !disabledFeatures.has('advisor')) {
+      tools = [{ type: 'advisor_20260301', name: 'advisor', model: info.advisor, max_uses: 3, caching: { type: 'ephemeral', ttl: '5m' } }, ...tools];
+      betas.push('advisor-tool-2026-03-01');
+    }
     body.tools = tools.map((t, i) => ({
       ...t,
       // Toolsets (e.g. browser_toolset_20260801) are not client-defined tools.
@@ -160,6 +165,7 @@ function buildBody({ model, system, messages, tools, maxTokens, effort, quick, c
 function featureFromError(msg) {
   if (msg.includes('block_binding') || msg.includes('thinking-binding-controls')) return 'block_binding';
   if (/compact/i.test(msg)) return 'compaction';
+  if (/advisor/i.test(msg)) return 'advisor';
   for (const f of ['fallbacks', 'context_management', 'eager_input_streaming', 'speed', 'output_config']) {
     if (msg.includes(f)) return f;
   }

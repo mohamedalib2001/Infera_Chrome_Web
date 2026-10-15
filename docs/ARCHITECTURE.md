@@ -151,6 +151,27 @@ If an endpoint rejects the toolset, the session falls back to the classic tools 
   in `<attached_files>` as `/attachments/<name>`: the browser toolset's `file_upload` (and the classic
   `file_upload` via `paths`) puts it into a page's file input.
 
+## Work tools: files, skills, helpers, the advisor
+
+* **Files** — `tools/files.js`, tool `export_file`. Spreadsheets (xlsx with a bold, frozen header row and
+  right-to-left sheets for Arabic; csv with a UTF-8 BOM), documents (docx with headings, lists, tables and
+  right-to-left paragraphs; pdf printed by Chrome itself via `Page.printToPDF` from generated HTML; html,
+  md, txt) and json — built in the browser without libraries (Office files are zip packages written
+  there) and saved to Downloads/Infera. Markdown tables in `content` become sheets.
+* **Skills** — tool `skill_save`: a task saved as a "/" shortcut (its `{{placeholders}}` become
+  parameters), optionally scheduled (once, daily, weekly, monthly, annually) through `scheduler.js`.
+* **Helpers** — tool `delegate_tasks` (top-level conversations only): up to 4 helper `AgentSession`s run
+  at the same time, each in an unfocused window of its own, with the same model and permission mode. Their
+  approvals appear in the parent's panel (answers are routed to them), their cost and tokens count towards
+  the parent's task and its spending limit, they are not saved as conversations, cannot delegate further,
+  and their windows close when they finish; each returns its final answer.
+* **Advisor** — model `claude-sonnet-5[advisor]`: Sonnet 5 executes and the request carries Anthropic's
+  `advisor_20260301` tool (beta `advisor-tool-2026-03-01`) with Opus 5.5 as the advisor (max 3 uses per
+  request, advisor-side caching). The prompt says when to consult it. The gateway accepts only advisor
+  models of its own list and bills `advisor_message` iterations at the advisor's price.
+* **History** — the History drawer searches titles and contents (this browser and the account,
+  `GET /api/browser-agent/conversations?q=`) and loads older pages on demand.
+
 ## Costs
 
 * **Prompt caching of the history** (`llm.js`): every step re-sends the whole conversation, so the newest

@@ -31,6 +31,7 @@ export function webTools(settings, policy = {}) {
 export const SERVER_RESULT_TYPES = new Set([
   'web_search_tool_result', 'web_fetch_tool_result',
   'code_execution_tool_result', 'bash_code_execution_tool_result', 'text_editor_code_execution_tool_result',
+  'advisor_tool_result',
 ]);
 
 // A short, human-readable line for the side panel's tool card.
@@ -40,6 +41,10 @@ export function summarizeServerResult(b) {
   if (b.type === 'web_search_tool_result') {
     const rows = (Array.isArray(c) ? c : []).slice(0, 8).map((r) => `• ${r.title || r.url}\n  ${r.url}`);
     return { text: rows.length ? rows.join('\n') : 'No results.', isError: false };
+  }
+  if (b.type === 'advisor_tool_result') {
+    // The advice itself is encrypted for the model on current advisors; only its arrival is shown.
+    return { text: c?.type === 'advisor_result' && c.text ? c.text.slice(0, 2000) : 'Advice received.', isError: false };
   }
   if (b.type === 'web_fetch_tool_result') {
     return { text: `${c?.content?.title || ''}\n${c?.url || ''}`.trim(), isError: false };

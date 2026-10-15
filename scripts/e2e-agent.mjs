@@ -6,6 +6,7 @@
 //   node scripts/e2e-agent.mjs
 import { chromium } from 'playwright';
 import http from 'node:http';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -37,7 +38,8 @@ const server = http.createServer((req, res) => {
       if (req.method === 'PUT') { convs.set(id, JSON.parse(body)); return res.end('{"ok":true}'); }
       if (req.method === 'DELETE') { convs.delete(id); return res.end('{"ok":true}'); }
       if (id) return res.end(JSON.stringify(convs.get(id) || null));
-      res.end(JSON.stringify([...convs.values()].map(({ id: cid, title, status, cost, currency, updatedAt }) => ({ id: cid, title, status, cost, currency, updatedAt }))));
+      const q = new URL(req.url, 'http://x').searchParams.get('q')?.toLowerCase() || '';
+      res.end(JSON.stringify([...convs.values()].filter((c) => !q || JSON.stringify(c).toLowerCase().includes(q)).map(({ id: cid, title, status, cost, currency, updatedAt }) => ({ id: cid, title, status, cost, currency, updatedAt }))));
     });
     return;
   }
@@ -161,6 +163,28 @@ const server = http.createServer((req, res) => {
           { type: 'content_block_stop', index: 0 },
           { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5 } }, { type: 'message_stop' },
           { type: 'infera_usage', amount: 0.4, currency: 'SAR', balance: 20, charged: true }]);
+      }
+      if (phase === 'delegate') {
+        const first = JSON.stringify(j.messages[0] || {});
+        const k = j.messages.filter((m) => m.role === 'assistant').length;
+        const say = (id, text) => sse(res, [start(id),
+          { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+          { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } },
+          { type: 'content_block_stop', index: 0 },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } }, { type: 'message_stop' },
+          { type: 'infera_usage', amount: 0.1, currency: 'SAR', balance: 20, charged: true }]);
+        if (first.includes('You are a helper')) {
+          globalThis.HELPER_TOOLS = (j.tools || []).map((t) => t.name || t.type);
+          return say('h1', first.includes('shop A') ? 'Shop A: 10 SAR (https://a.example)' : 'Shop B: 12 SAR (https://b.example)');
+        }
+        if (k === 0) {
+          return sse(res, [start('d1'),
+            { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'dl_1', name: 'delegate_tasks', input: {} } },
+            { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: JSON.stringify({ tasks: [{ task: 'Price at shop A' }, { task: 'Price at shop B' }] }) } },
+            { type: 'content_block_stop', index: 0 },
+            { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }]);
+        }
+        return say('d2', 'Shop A is cheaper.');
       }
       if (phase === 'compact') {
         // A long task: a note, then the server summarizes the history, then the end.
@@ -323,7 +347,7 @@ check('long history: summarized on the server at 250k tokens (compaction), outpu
 check('task named for the cost log', decodeURIComponent(requests[0].headers['x-infera-task'] || '') === 'What is on this page?');
 const t0 = requests[0].body.tools;
 check('tools: web search/fetch first, own tools w/ eager streaming, memory, cache_control',
-  t0.length === 30 && t0.some((t) => t.name === 'task_notes') && t0.some((t) => t.name === 'memory_search') && t0[0].type === 'web_search_20260318' && t0[0].response_inclusion === 'excluded' && t0[1].type === 'web_fetch_20260318'
+  t0.length === 33 && t0.some((t) => t.name === 'export_file') && t0.some((t) => t.name === 'delegate_tasks') && t0.some((t) => t.name === 'task_notes') && t0.some((t) => t.name === 'memory_search') && t0[0].type === 'web_search_20260318' && t0[0].response_inclusion === 'excluded' && t0[1].type === 'web_fetch_20260318'
   && !t0[0].eager_input_streaming && t0[2].eager_input_streaming === true && t0.some((t) => t.name === 'memory_save') && t0.some((t) => t.name === 'all_tabs') && !!t0.at(-1).cache_control,
   t0.map((t) => t.name || t.type).join(','));
 check('tab context in first user msg', JSON.stringify(requests[0].body.messages[0]).includes('<tab_context>'));
@@ -623,6 +647,64 @@ const c3 = requests.at(-1)?.body;
 check('long task: summarized and goes on', long.status === 'done' && long.compactions === 1 && long.events === 1 && long.last === 'Shop A is cheapest.', JSON.stringify(long));
 check('long task: only the summary onward is sent, notebook handed back', c3?.messages[0]?.role === 'assistant' && c3.messages[0].content[0].type === 'compaction'
   && JSON.stringify(c3.messages.at(-1)).includes('<task_notes>') && JSON.stringify(c3.messages.at(-1)).includes('Price at shop A: 10 SAR'), JSON.stringify(c3?.messages || []).slice(0, 500));
+
+// Helpers: delegate_tasks runs two helpers at once, in windows of their own, and
+// returns both answers; helpers can't delegate and aren't saved as conversations.
+requests.length = 0;
+phase = 'delegate';
+const windowsBefore = await sw.evaluate(async () => (await chrome.windows.getAll()).length);
+const del = await sw.evaluate(async ({ tabId }) => {
+  const s = new self.__infera.AgentSession({ kind: 'panel' });
+  s.classicTools = true;
+  s.modelOverride = 'claude-opus-5-5';
+  await s.run('Which shop is cheaper?', { startTabId: tabId });
+  const result = s.messages.find((m) => m.role === 'user' && Array.isArray(m.content) && m.content.some((b) => b.tool_use_id === 'dl_1'))?.content.find((b) => b.tool_use_id === 'dl_1');
+  const saved = ((await chrome.storage.local.get('conversations')).conversations || []).map((c) => c.title);
+  return { status: s.status, result: JSON.stringify(result?.content), cost: s.cost, windows: (await chrome.windows.getAll()).length, saved };
+}, { tabId });
+check('helpers: two at once, both answers back, their cost counted', del.status === 'done' && del.result.includes('Shop A: 10 SAR') && del.result.includes('Shop B: 12 SAR') && del.cost >= 0.29, JSON.stringify(del).slice(0, 400));
+check('helpers: windows closed, not saved, cannot delegate further', del.windows === windowsBefore && !del.saved.some((t) => /^Helper/.test(t || '')) && Array.isArray(globalThis.HELPER_TOOLS) && !globalThis.HELPER_TOOLS.includes('delegate_tasks') && globalThis.HELPER_TOOLS.includes('export_file'), JSON.stringify({ w: [windowsBefore, del.windows], tools: globalThis.HELPER_TOOLS?.slice(-6) }));
+
+// The advisor: Sonnet 5 does the work and may consult Opus 5.5.
+requests.length = 0;
+phase = 'plain';
+await run('claude-sonnet-5[advisor]', { classic: false });
+const adv = requests[0]?.body;
+check('advisor: Sonnet 5 executor, Opus 5.5 advisor tool, beta and prompt note', adv?.model === 'claude-sonnet-5' && adv.tools[0]?.type === 'advisor_20260301' && adv.tools[0].model === 'claude-opus-5-5'
+  && String(requests[0].headers['anthropic-beta']).includes('advisor-tool-2026-03-01') && JSON.stringify(adv.system).includes('You have an advisor'), JSON.stringify(adv?.tools?.[0]));
+
+// Files: spreadsheets, Word documents, PDFs and CSVs built in the browser; skills saved.
+const files = await sw.evaluate(async () => {
+  const I = self.__infera;
+  const ctx = { sessionId: 'f', mode: 'skip_all_permission_checks' };
+  const x = await I.buildFile({ format: 'xlsx', filename: 'Prices', rows: [['المتجر', 'السعر'], ['A', 10], ['B', '12.5']] });
+  const d = await I.buildFile({ format: 'docx', title: 'Report', content: '# تقرير\n\nالنص **مهم**.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n- one\n- two' });
+  const c = await I.buildFile({ format: 'csv', content: '| a | b |\n|---|---|\n| 1 | "x" |' });
+  const p = await I.buildFile({ format: 'pdf', title: 'PDF', content: '# Hello\n\nA table:\n\n| a | b |\n|---|---|\n| 1 | 2 |' });
+  const saved = await I.executeTool('export_file', { format: 'md', filename: 'notes', content: '# Notes' }, ctx, { internal: true });
+  const skill = await I.executeTool('skill_save', { command: 'daily-prices', prompt: 'Check the price of {{product}} at shop A', schedule: { frequency: 'daily', time: '08:30' } }, ctx, { internal: true });
+  const all = await chrome.storage.local.get(null);
+  const sc = Object.values(all).flat().find((v) => v && v.command === 'daily-prices');
+  const sch = Object.values(all).flat().find((v) => v && v.name === '/daily-prices' && v.frequency);
+  return { x: x.base64, d: d.base64, c: new TextDecoder('utf-8', { ignoreBOM: true }).decode(Uint8Array.from(atob(c.base64), (ch) => ch.charCodeAt(0))), p: p.base64.slice(0, 12), names: [x.filename, d.filename, p.filename], saved: saved.content[0].text, savedErr: !!saved.isError, skill: skill.content[0].text, sc, sch: !!sch?.nextRun };
+});
+const unzip = (b64) => {
+  const r = spawnSync('python3', ['-I', '-c', 'import sys,zipfile,io,base64,json; z=zipfile.ZipFile(io.BytesIO(base64.b64decode(sys.stdin.read()))); print(json.dumps({n: z.read(n).decode() for n in z.namelist()}))'], { input: b64, encoding: 'utf8' });
+  return r.status === 0 ? JSON.parse(r.stdout) : { error: r.stderr };
+};
+const xz = unzip(files.x);
+const dz = unzip(files.d);
+const sheet = xz['xl/worksheets/sheet1.xml'] || '';
+const docXml = dz['word/document.xml'] || '';
+check('files: xlsx is a valid workbook, numbers as numbers, Arabic right to left', sheet.includes('rightToLeft="1"') && sheet.includes('<v>12.5</v>') && sheet.includes('المتجر'), JSON.stringify(xz).slice(0, 300));
+check('files: docx with headings, bold, table, right to left', /Heading1/.test(docXml) && docXml.includes('<w:b/>') && docXml.includes('<w:tbl>') && docXml.includes('<w:bidi/>'), JSON.stringify(Object.keys(dz)));
+check('files: pdf printed by Chrome, csv from a Markdown table', files.p.startsWith('JVBERi') && files.c.startsWith('﻿a,b') && files.c.includes('"""x"""') && files.names.join() === 'Prices.xlsx,Report.docx,PDF.pdf', JSON.stringify({ p: files.p, c: files.c, n: files.names }));
+check('files: export_file saves to Downloads/Infera', !files.savedErr && /Saved notes.*\.md/.test(files.saved), files.saved);
+check('skills: saved as /daily-prices with its {{product}} parameter and a daily schedule', files.sc?.params?.[0]?.name === 'product' && files.sch && /daily-prices/.test(files.skill), JSON.stringify(files.sc));
+
+// History: searching conversations (this browser and the account).
+const hist = await sw.evaluate(() => self.__infera.panelCall(null, { type: 'history_list', q: 'cheaper', paged: true }));
+check('history: search finds a conversation by its content', Array.isArray(hist.items) && hist.items.length > 0 && hist.items.every((c) => /cheaper|shop/i.test(c.title || '')), JSON.stringify(hist).slice(0, 300));
 
 // A task cut off mid-step (browser closed) continues cleanly from the history.
 const resumed = await sw.evaluate(() => {

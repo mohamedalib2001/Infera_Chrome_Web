@@ -16,6 +16,10 @@ What you can do
 • Save your best prompts as “/” shortcuts and schedule recurring tasks
 • Record a workflow once (with voice narration) and replay it as a shortcut
 • Export a GIF of what the agent did
+• Get results as Excel, Word, PDF or CSV files, ready to download
+• Long tasks that keep going: older steps are summarized and a task notebook keeps every finding
+• Up to 4 helper agents working in parallel on independent parts of a task
+• Long-term memory in your account, on every device
 
 Your INFERA Agent account
 Sign in with your inferaagent.com account (password, Google or SSO). No API keys: usage is paid from your INFERA Agent credits, and the model key never reaches your browser.
@@ -41,6 +45,10 @@ Infera Agent is developed and operated by Infera Engine Ltd, registered in Engla
 • حفظ أفضل أوامرك كاختصارات «/» وجدولة المهام المتكررة
 • تسجيل سير عمل مرة واحدة (مع السرد الصوتي) وإعادة تشغيله كاختصار
 • تصدير صورة GIF لما قام به الوكيل
+• الحصول على النتائج كملفات Excel وWord وPDF وCSV جاهزة للتنزيل
+• مهام طويلة لا تتوقف: تُلخَّص الخطوات القديمة ويحفظ دفتر المهمة كل النتائج
+• حتى 4 وكلاء مساعدين يعملون معًا على أجزاء المهمة المستقلة
+• ذاكرة دائمة في حسابك على كل أجهزتك
 
 حسابك على إنفرا إيجنت
 سجّل الدخول بحسابك على inferaagent.com (كلمة مرور أو Google أو SSO). لا مفاتيح API: الاستهلاك يُخصم من رصيدك في إنفرا إيجنت، ومفتاح النموذج لا يصل إلى متصفحك أبدًا.

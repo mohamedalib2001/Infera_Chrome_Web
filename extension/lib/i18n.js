@@ -37,7 +37,7 @@ const STR = {
     webResearchLabel: 'Web research (each search is charged)', byTask: 'By task (last 30 days)', operations: 'Operations log',
     calls: 'calls', searches: 'searches', cacheSaved: 'History served from cache (10× cheaper)', untitled: '(untitled)',
     noCosts: 'No costs yet.', costsLocalOnly: 'Showing this browser only',
-    micDenied: 'Microphone access is needed for narration — allow it on the settings page that just opened, then start recording again.', fromAccount: 'from your account', compacted: 'Earlier steps were summarized so the task can keep going; your notebook and goals are kept.', budgetTitle: 'Spending limit reached', budgetContinue: 'Continue', budgetStop: 'Stop here',
+    micDenied: 'Microphone access is needed for narration — allow it on the settings page that just opened, then start recording again.', fromAccount: 'from your account', searchHistory: 'Search conversations…', loadMore: 'Load more', noMatches: 'No conversation matches.', compacted: 'Earlier steps were summarized so the task can keep going; your notebook and goals are kept.', budgetTitle: 'Spending limit reached', budgetContinue: 'Continue', budgetStop: 'Stop here',
     noProvider: 'Your organization has not set up a model provider in Infera Agent yet. Ask an administrator to add it.',
   },
   ar: {
@@ -77,7 +77,7 @@ const STR = {
     webResearchLabel: 'البحث في الإنترنت (كل عملية بحث تُحتسب)', byTask: 'حسب المهمة (آخر 30 يومًا)', operations: 'سجل العمليات',
     calls: 'طلبات', searches: 'عمليات بحث', cacheSaved: 'نسبة السجل المقروء من الذاكرة المؤقتة (أرخص 10 مرات)', untitled: '(بدون عنوان)',
     noCosts: 'لا توجد تكاليف بعد.', costsLocalOnly: 'يُعرض ما في هذا المتصفح فقط',
-    micDenied: 'يلزم السماح بالميكروفون للسرد الصوتي — اسمح به من صفحة الإعدادات التي فُتحت، ثم ابدأ التسجيل مرة أخرى.', fromAccount: 'من حسابك', compacted: 'لُخّصت الخطوات السابقة لتستمر المهمة دون توقف، مع الاحتفاظ بالأهداف ودفتر المهمة.', budgetTitle: 'تم الوصول إلى حد الإنفاق', budgetContinue: 'متابعة', budgetStop: 'توقف هنا',
+    micDenied: 'يلزم السماح بالميكروفون للسرد الصوتي — اسمح به من صفحة الإعدادات التي فُتحت، ثم ابدأ التسجيل مرة أخرى.', fromAccount: 'من حسابك', searchHistory: 'ابحث في المحادثات…', loadMore: 'عرض المزيد', noMatches: 'لا توجد محادثة مطابقة.', compacted: 'لُخّصت الخطوات السابقة لتستمر المهمة دون توقف، مع الاحتفاظ بالأهداف ودفتر المهمة.', budgetTitle: 'تم الوصول إلى حد الإنفاق', budgetContinue: 'متابعة', budgetStop: 'توقف هنا',
     noProvider: 'لم تُضِف مؤسستك مزوّد النموذج في إنفرا إيجنت بعد. اطلب من المسؤول إضافته.',
   },
 };

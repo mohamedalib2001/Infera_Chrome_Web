@@ -218,7 +218,8 @@ export async function inferaLimits(daily, retried = false) {
 export async function inferaConversations(method, id, entry, retried = false) {
   const a = await currentInfera();
   if (!a) throw new Error('Not signed in.');
-  const url = `${a.server}/api/browser-agent/conversations${id ? `/${encodeURIComponent(id)}` : ''}`;
+  const query = method === 'list' && entry ? `?${new URLSearchParams(Object.entries(entry).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)]))}` : '';
+  const url = `${a.server}/api/browser-agent/conversations${id ? `/${encodeURIComponent(id)}` : ''}${query}`;
   try {
     if (method === 'put') return await inferaFetch(url, { token: a.accessToken, method: 'PUT', body: entry });
     if (method === 'delete') return await inferaFetch(url, { token: a.accessToken, method: 'DELETE' });

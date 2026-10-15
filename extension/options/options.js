@@ -69,7 +69,7 @@ const tr = (k) => (L[currentLang()] || L.en)[k] ?? L.en[k] ?? k;
 
 const MODELS = [
   ['claude-opus-5-5', 'Claude Opus 5.5 — recommended'], ['claude-opus-5', 'Claude Opus 5'], ['claude-fable-5-1', 'Claude Fable 5.1 — most capable'],
-  ['claude-sonnet-5', 'Claude Sonnet 5'], ['claude-haiku-4-5', 'Claude Haiku 4.5'],
+  ['claude-sonnet-5', 'Claude Sonnet 5'], ['claude-sonnet-5[advisor]', 'Claude Sonnet 5 + Opus 5.5 advisor — economical'], ['claude-haiku-4-5', 'Claude Haiku 4.5'],
   ['claude-opus-5[fast]', 'Claude Opus 5 [fast] — Quick Mode'], ['claude-opus-5-5[fast]', 'Claude Opus 5.5 [fast] — Quick Mode'],
 ];
 

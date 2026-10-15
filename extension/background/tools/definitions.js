@@ -356,6 +356,67 @@ export const TASK_TOOLS = [
   },
 ];
 
+// Results as files, saved skills, and parallel helpers (side panel; handled in the
+// executor, except delegate_tasks, which the agent loop runs).
+export const WORK_TOOLS = [
+  {
+    name: 'export_file',
+    description: 'Create a file from your results and save it to the user\'s Downloads/Infera folder: a spreadsheet (xlsx, csv), a document (docx, pdf, html, md, txt) or data (json). Use it when the user asks for a file, a report, a table to download, or "Excel/Word/PDF". For xlsx/csv give rows (first row = headers) or sheets; for documents give content in Markdown (headings, lists, tables, **bold**, links). Arabic text is laid out right to left. Tell the user the file name when done.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        format: { type: 'string', enum: ['xlsx', 'csv', 'docx', 'pdf', 'html', 'md', 'txt', 'json'] },
+        filename: { type: 'string', description: 'File name without folders, e.g. "Laptop prices October 2026".' },
+        title: { type: 'string', description: 'Document title (shown at the top of documents).' },
+        content: { type: 'string', description: 'For documents: the body in Markdown (or full HTML). For json/txt/md: the text.' },
+        rows: { type: 'array', items: { type: 'array', items: {} }, description: 'For xlsx/csv: rows of cells; the first row is the header.' },
+        sheets: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, rows: { type: 'array', items: { type: 'array', items: {} } } }, required: ['rows'] }, description: 'For xlsx with several sheets.' },
+      },
+      required: ['format'],
+    },
+  },
+  {
+    name: 'skill_save',
+    description: 'Save a task as a reusable skill: a "/" shortcut the user can run again, optionally on a schedule. Use it only when the user asks to save, repeat or schedule something, or agrees when you offer it after a task that went well. Write the prompt as complete, standalone instructions (what to open, what to do, what to produce), with {{placeholders}} for values that change.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: 'Short command name, e.g. "daily-prices" (used as /daily-prices).' },
+        description: { type: 'string' },
+        prompt: { type: 'string', description: 'The full instructions to run.' },
+        start_url: { type: 'string' },
+        schedule: {
+          type: 'object',
+          description: 'Optional: run it automatically.',
+          properties: {
+            frequency: { type: 'string', enum: ['once', 'daily', 'weekly', 'monthly', 'annually'] },
+            time: { type: 'string', description: 'HH:MM, 24-hour, the user\'s local time.' },
+            date: { type: 'string', description: 'YYYY-MM-DD for "once".' },
+            day_of_week: { type: 'integer', description: '0 = Sunday … 6 = Saturday, for "weekly".' },
+            day_of_month: { type: 'integer', description: '1–31, for "monthly".' },
+          },
+          required: ['frequency'],
+        },
+      },
+      required: ['command', 'prompt'],
+    },
+  },
+  {
+    name: 'delegate_tasks',
+    description: 'Run up to 4 independent sub-tasks at the same time, each by a helper agent in its own browser window, and get back each helper\'s final answer. Use it to speed up work that splits into parts that don\'t depend on each other (e.g. collect the price of a product from 4 different shops, read 3 long documents). Give each helper complete, standalone instructions and the page to start on; say exactly what to report back. Helpers can\'t see your conversation, can\'t delegate further, and their windows close when they finish.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        tasks: {
+          type: 'array', minItems: 1, maxItems: 4,
+          items: { type: 'object', properties: { task: { type: 'string' }, start_url: { type: 'string' } }, required: ['task'] },
+        },
+      },
+      required: ['tasks'],
+    },
+  },
+];
+
 export const PANEL_TOOLS = [...MCP_TOOLS, ...CLASSIC_TOOLS];
 
-export const TOOL_BY_NAME = Object.fromEntries([...PANEL_TOOLS, ...MEMORY_TOOLS, ...ALL_TABS_TOOLS, ...TASK_TOOLS].map((t) => [t.name, t]));
+export const TOOL_BY_NAME = Object.fromEntries([...PANEL_TOOLS, ...MEMORY_TOOLS, ...ALL_TABS_TOOLS, ...TASK_TOOLS, ...WORK_TOOLS].map((t) => [t.name, t]));

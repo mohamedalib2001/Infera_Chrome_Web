@@ -57,6 +57,9 @@ export const MODELS = [
   { id: 'claude-opus-5', label: 'Claude Opus 5', thinking: 'adaptive', fast: true, browser: true, fallbacks: true, compact: true },
   { id: 'claude-fable-5-1', label: 'Claude Fable 5.1 — most capable', thinking: 'always', browser: true, preserved: true, fallbacks: true, compact: true },
   { id: 'claude-sonnet-5', label: 'Claude Sonnet 5', thinking: 'adaptive', browser: true, compact: true },
+  // Sonnet 5 does the work and consults Opus 5.5 on plans and hard steps: close to
+  // Opus quality on long tasks at a lower price.
+  { id: 'claude-sonnet-5[advisor]', label: 'Claude Sonnet 5 + Opus 5.5 advisor — economical', thinking: 'adaptive', browser: true, compact: true, advisor: 'claude-opus-5-5' },
   { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', thinking: 'none', maxOutput: 64_000 },
   { id: 'claude-opus-5[fast]', label: 'Claude Opus 5 [fast] — Quick Mode', thinking: 'adaptive', fast: true, quick: true, fallbacks: true },
   { id: 'claude-opus-5-5[fast]', label: 'Claude Opus 5.5 [fast] — Quick Mode', thinking: 'always', fast: true, quick: true, preserved: true, fallbacks: true },

@@ -17,7 +17,9 @@ import { safetyCheck, hardBlockReason, forcedConfirmation, sensitiveInputBlock }
 import { callPage, ensureInjected, overlay, waitForLoad } from '../page.js';
 import { gif } from '../gif.js';
 import { completeText, validateInput } from '../llm.js';
-import { listShortcuts, findShortcut } from '../shortcuts.js';
+import { listShortcuts, findShortcut, saveShortcut } from '../shortcuts.js';
+import { saveTask } from '../scheduler.js';
+import { buildFile } from './files.js';
 import { saveMemory, searchMemory, forgetMemory } from '../memory.js';
 import { TOOL_BY_NAME } from './definitions.js';
 import {
@@ -635,6 +637,36 @@ const impl = {
 
   async turn_answer_start() {
     return ok(text('ok'));
+  },
+
+  async export_file(ctx, input) {
+    let f;
+    try { f = await buildFile(input); } catch (e) { fail(e.message); }
+    const path = await saveToDisk(f.base64, f.mime, f.filename);
+    const saved = String(path).split(/[\\/]/).pop();
+    // Chrome may number a name already taken ("Report (1).pdf").
+    const name = saved.startsWith(f.filename.replace(/\.[^.]+$/, '')) ? saved : f.filename;
+    return ok(text(`Saved ${name} (${Math.max(1, Math.round(f.bytes / 1024))} KB) to the Downloads/Infera folder.`));
+  },
+
+  async skill_save(ctx, input) {
+    const command = String(input.command || '').replace(/^\//, '').trim();
+    const params = [...new Set([...String(input.prompt || '').matchAll(/\{\{\s*([\w-]+)\s*\}\}/g)].map((m) => m[1]))].map((name) => ({ name, description: '', default: '' }));
+    const existing = await findShortcut({ command });
+    let sc;
+    try {
+      sc = await saveShortcut({ id: existing?.id, command, description: input.description || '', prompt: input.prompt, params, startUrl: input.start_url || '', createdAt: existing?.createdAt });
+    } catch (e) { fail(e.message); }
+    let when = '';
+    if (input.schedule?.frequency) {
+      const sch = input.schedule;
+      let task;
+      try {
+        task = await saveTask({ name: `/${sc.command}`, prompt: sc.prompt, startUrl: sc.startUrl, frequency: sch.frequency, time: sch.time || '09:00', date: sch.date || '', dayOfWeek: sch.day_of_week ?? 1, dayOfMonth: sch.day_of_month ?? 1 });
+      } catch (e) { fail(`Saved /${sc.command}, but the schedule was refused: ${e.message}`); }
+      when = task.nextRun ? ` Scheduled (${sch.frequency}); next run ${new Date(task.nextRun).toLocaleString()}.` : ' Scheduled.';
+    }
+    return ok(text(`Saved the skill /${sc.command}${params.length ? ` with ${params.map((p) => `{{${p.name}}}`).join(', ')}` : ''}. The user can run it from the side panel by typing /${sc.command}.${when}`));
   },
 
   async all_tabs(ctx, input) {

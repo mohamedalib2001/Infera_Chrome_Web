@@ -6,7 +6,7 @@
 //               language, we execute the batch, then send a fresh screenshot.
 import { streamMessage, modelInfo } from './llm.js';
 import { executeTool } from './tools/executor.js';
-import { PANEL_TOOLS, MEMORY_TOOLS, ALL_TABS_TOOLS, TASK_TOOLS, TOOL_BY_NAME } from './tools/definitions.js';
+import { PANEL_TOOLS, MEMORY_TOOLS, ALL_TABS_TOOLS, TASK_TOOLS, WORK_TOOLS, TOOL_BY_NAME } from './tools/definitions.js';
 import { webTools, SERVER_RESULT_TYPES, summarizeServerResult, citedSources } from './tools/web-tools.js';
 import { listMemory, memoryBlock } from './memory.js';
 import { inferaConversations } from './auth.js';
@@ -34,6 +34,8 @@ import { remoteTools, callRemoteTool } from './remote-mcp.js';
 const MAX_TURNS = 5000;
 // The task notebook (task_notes) holds at most this much text.
 const NOTES_MAX = 30_000;
+// delegate_tasks: helpers running at the same time.
+const MAX_HELPERS = 4;
 // Larger conversations are kept in the account from their latest summary on.
 const ACCOUNT_COPY_MAX = 4 * 1024 * 1024;
 const HISTORY_LIMIT = 50;
@@ -62,6 +64,9 @@ export class AgentSession {
     this.currency = '';
     this.notes = '';             // the task notebook (task_notes): survives compaction
     this.compactions = 0;
+    this.depth = 0;              // 1 for a helper started by delegate_tasks
+    this.ephemeral = false;      // helpers are not saved as conversations of their own
+    this.children = new Set();   // helpers running now
   }
 
   // ---------- UI plumbing ----------
@@ -108,6 +113,7 @@ export class AgentSession {
   answer(id, answer) {
     const fn = this.pending.get(id);
     if (fn) fn(answer);
+    else for (const c of this.children) c.answer(id, answer); // a helper's approval shown in this panel
   }
 
   // A message sent while the task runs; it goes into the next step.
@@ -130,6 +136,7 @@ export class AgentSession {
 
   stop() {
     this.queue = [];
+    for (const c of this.children) c.stop();
     this.abort?.abort();
     for (const fn of [...this.pending.values()]) fn('deny');
   }
@@ -164,7 +171,7 @@ export class AgentSession {
         await this.#runQuick({ userText, model, mode, settings, tabs, initialTabId, attachments });
       } else {
         const toolset = this.#useToolset(model);
-        const flags = { web: !!modelInfo(model).browser && settings.webResearch !== false && !this.noWebTools, memory: settings.memory !== false };
+        const flags = { web: !!modelInfo(model).browser && settings.webResearch !== false && !this.noWebTools, memory: settings.memory !== false, advisor: !!modelInfo(model).advisor, helpers: this.depth === 0 };
         await this.#ensureSystem({ mode, tabs, toolset, ...flags });
         const content = [tabContextBlock(tabs, initialTabId)];
         const note = this.#contextNote(mode, tabs);
@@ -219,6 +226,7 @@ export class AgentSession {
   }
 
   async #notifyDone(settings) {
+    if (this.ephemeral) return;
     const last = [...this.messages].reverse().find((m) => m.role === 'assistant');
     const txt = (last?.content || []).filter((b) => b.type === 'text').map((b) => b.text).join(' ').slice(0, 180);
     if (settings.sound) playSound(this.status === 'done' ? 'done' : 'error');
@@ -329,10 +337,10 @@ export class AgentSession {
   // the prompt cache stays warm and thinking blocks stay valid; later changes
   // (another permission mode, a site with extra know-how) are appended to the
   // conversation as notes instead.
-  async #ensureSystem({ mode, tabs, toolset, web = false, memory = false }) {
-    const key = `${toolset}|${web}|${memory}`;
+  async #ensureSystem({ mode, tabs, toolset, web = false, memory = false, advisor = false, helpers = false }) {
+    const key = `${toolset}|${web}|${memory}|${advisor}|${helpers}`;
     if (this.system && this.systemKey === key) return;
-    this.system = await buildSystem({ mode, tabs, toolset, web, memory });
+    this.system = await buildSystem({ mode, tabs, toolset, web, memory, advisor, helpers });
     this.systemKey = key;
     this.notedMode = mode;
     this.notedSkills = new Set(domainSkills(tabs.map((t) => t.url)).map((s) => s.name));
@@ -394,7 +402,8 @@ export class AgentSession {
     const remoteByName = new Map(remote.map((t) => [t.name, t]));
     const remoteDefs = remote.map(({ _server, _tool, ...t }) => t); // eslint-disable-line no-unused-vars
     const useWeb = () => !!modelInfo(model).browser && settings.webResearch !== false && !this.noWebTools;
-    const extras = () => [...(settings.allTabsAccess !== false ? ALL_TABS_TOOLS : []), ...(settings.memory !== false ? MEMORY_TOOLS : []), ...TASK_TOOLS, ...remoteDefs];
+    const work = WORK_TOOLS.filter((t) => t.name !== 'delegate_tasks' || this.depth === 0);
+    const extras = () => [...(settings.allTabsAccess !== false ? ALL_TABS_TOOLS : []), ...(settings.memory !== false ? MEMORY_TOOLS : []), ...TASK_TOOLS, ...work, ...remoteDefs];
     const toolList = (ts) => [
       ...(ts ? [BROWSER_TOOLSET] : []),
       ...(useWeb() ? webTools(settings, policy) : []),
@@ -419,7 +428,7 @@ export class AgentSession {
         if (e.status === 400 && /web_search|web_fetch/.test(e.message) && useWeb() && !this.#usedServerTools()) {
           this.noWebTools = true;
           tools = toolList(toolset);
-          await this.#ensureSystem({ mode, tabs: await tabGroups.tabs(this.id), toolset, web: false, memory: settings.memory !== false });
+          await this.#ensureSystem({ mode, tabs: await tabGroups.tabs(this.id), toolset, web: false, memory: settings.memory !== false, advisor: !!modelInfo(model).advisor, helpers: this.depth === 0 });
           turn--;
           continue;
         }
@@ -428,7 +437,7 @@ export class AgentSession {
           this.classicTools = true;
           toolset = false;
           tools = toolList(false);
-          await this.#ensureSystem({ mode, tabs: await tabGroups.tabs(this.id), toolset: false, web: useWeb(), memory: settings.memory !== false });
+          await this.#ensureSystem({ mode, tabs: await tabGroups.tabs(this.id), toolset: false, web: useWeb(), memory: settings.memory !== false, advisor: !!modelInfo(model).advisor, helpers: this.depth === 0 });
           turn--;
           continue;
         }
@@ -494,6 +503,8 @@ export class AgentSession {
           r = await this.#runRemote(remoteByName.get(u.name), u, mode, settings);
         } else if (u.name === 'task_notes') {
           r = this.#taskNotes(u.input);
+        } else if (u.name === 'delegate_tasks' && this.depth === 0) {
+          r = await this.#delegate(u.input, model, mode);
         } else if (!TOOL_BY_NAME[u.name]) {
           r = { content: [{ type: 'text', text: `Unknown tool ${u.name}` }], isError: true };
         } else {
@@ -513,6 +524,61 @@ export class AgentSession {
       if (this.abort.signal.aborted) throw new DOMException('aborted', 'AbortError');
     }
     this.emit({ type: 'error', message: `Stopped after ${MAX_TURNS} steps.` });
+  }
+
+  // ---------- helpers (delegate_tasks) ----------
+  // Up to 4 helper agents, each in a window of its own, work at the same time; their
+  // approvals appear in this panel, their cost counts towards this task, and each
+  // returns its final answer.
+  async #delegate(input, model, mode) {
+    const tasks = (Array.isArray(input?.tasks) ? input.tasks : []).filter((t) => String(t?.task || '').trim()).slice(0, MAX_HELPERS);
+    if (!tasks.length) return { content: [{ type: 'text', text: 'Give at least one task.' }], isError: true };
+    const own = (await tabGroups.tabs(this.id).catch(() => [])).find((t) => t.active) || null;
+    const results = await Promise.all(tasks.map(async (t, i) => {
+      const label = `Helper ${i + 1}`;
+      const url = /^https?:\/\//.test(String(t.start_url || '')) ? t.start_url : 'about:blank';
+      let win = null;
+      const child = new AgentSession({ kind: 'panel', title: `${label}: ${t.task.slice(0, 60)}` });
+      child.depth = this.depth + 1;
+      child.ephemeral = true;
+      child.modelOverride = model;
+      child.modeOverride = mode;
+      child.classicTools = this.classicTools;
+      child.runShortcut = null;
+      this.children.add(child);
+      const off = child.subscribe(({ sessionId, ...ev }) => { // eslint-disable-line no-unused-vars
+        if (ev.type === 'permission_request' || ev.type === 'plan_request') {
+          this.emit({ ...ev, request: { ...ev.request, description: `${label}: ${ev.request.description || ''}` } });
+        }
+      });
+      const stopChild = () => child.stop();
+      this.abort.signal.addEventListener('abort', stopChild);
+      this.emit({ type: 'info', message: `${label} started: ${t.task.slice(0, 120)}` });
+      try {
+        win = await chrome.windows.create({ url, focused: false, state: 'normal' });
+        child.windowId = win.id;
+        await child.run(`${t.task}\n\nYou are a helper working on one part of a larger task for the user. Work on your own; when you finish, reply with exactly what was asked, concisely, with the facts and the URLs you used.`, { startTabId: win.tabs[0].id });
+      } catch (e) {
+        child.status = 'error';
+        child.failure = e.message;
+      } finally {
+        off();
+        this.abort.signal.removeEventListener('abort', stopChild);
+        this.children.delete(child);
+        this.cost += child.cost;
+        this.runCost += child.cost;
+        if (child.currency) this.currency = child.currency;
+        this.usage.input_tokens += child.usage.input_tokens || 0;
+        this.usage.output_tokens += child.usage.output_tokens || 0;
+        if (win) await chrome.windows.remove(win.id).catch(() => {});
+      }
+      const last = [...child.messages].reverse().find((m) => m.role === 'assistant' && Array.isArray(m.content) && m.content.some((b) => b.type === 'text' && b.text.trim()));
+      const answer = (last?.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+      return `## ${label} — ${child.status}\nTask: ${t.task}\n\n${answer || child.failure || '(no answer)'}`;
+    }));
+    if (own) await chrome.tabs.update(own.tabId, { active: true }).catch(() => {});
+    this.emit({ type: 'cost', task: this.runCost, conversation: this.cost, call: 0, currency: this.currency });
+    return { content: [{ type: 'text', text: results.join('\n\n') }] };
   }
 
   #notesBlock() {
@@ -624,6 +690,7 @@ export class AgentSession {
 
   // ---------- persistence ----------
   async #persist() {
+    if (this.ephemeral) return;
     const all = await getLocal(STORAGE_KEYS.CONVERSATIONS, []);
     const stripped = this.messages.map((m) => ({
       role: m.role,

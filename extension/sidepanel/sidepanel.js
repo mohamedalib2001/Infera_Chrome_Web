@@ -249,6 +249,7 @@ const TOOL_ICON = {
   // Server tools and memory
   web_search: '🔎', web_fetch: '↓', code_execution: '⚙', bash_code_execution: '⚙', text_editor_code_execution: '⚙',
   memory_save: '★', memory_forget: '☆', memory_search: '⌕', task_notes: '✎', all_tabs: '▦',
+  export_file: '⤓', skill_save: '⚡', delegate_tasks: '⫶', advisor: '✦', advisor_tool_result: '✦',
 };
 
 function targetText(tg) {
@@ -289,6 +290,9 @@ function toolSummary(name, i = {}) {
     case 'memory_forget': return String(i.id || '');
     case 'memory_search': return `“${String(i.query || '').slice(0, 60)}”`;
     case 'task_notes': return i.action || '';
+    case 'export_file': return `${i.filename || i.title || ''}.${i.format || ''}`.replace(/^\./, '');
+    case 'skill_save': return `/${String(i.command || '').replace(/^\//, '')}${i.schedule?.frequency ? ` · ${i.schedule.frequency}` : ''}`;
+    case 'delegate_tasks': return `${i.tasks?.length || 0} helpers`;
     case 'all_tabs': return `${i.action}${i.match ? ` “${i.match}”` : i.duplicates ? ' duplicates' : i.tab_ids?.length ? ` ${i.tab_ids.length} tab(s)` : ''}`;
     default: return '';
   }
@@ -543,15 +547,35 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#dra
 const fmt = (ts) => (ts ? new Date(ts).toLocaleString(currentLang() === 'ar' ? 'ar' : undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—');
 
 // History
+// History: every conversation in this browser and the account, searchable, with older pages on demand.
+const historyItem = (c) => el('div', { class: 'card item click', onclick: async () => { closeDrawer(); loadState(await call('load_conversation', { id: c.id })); } },
+  el('div', { class: 'row' }, el('div', { class: 't grow' }, c.kind === 'scheduled' ? `⏰ ${c.title}` : c.title),
+    el('button', { class: 'icon-btn', 'aria-label': t('delete'), onclick: async (e) => { e.stopPropagation(); loadState(await call('delete_conversation', { id: c.id })); $('#btnHistory').click(); } }, '×')),
+  el('div', { class: 's' }, `${fmt(c.updatedAt)} · ${t(c.status) || c.status || ''}${c.cost > 0 ? ` · ${money(c.cost, c.currency)}` : ''}${c.remote ? ` · ${t('fromAccount')}` : ''}`));
 $('#btnHistory').addEventListener('click', async () => {
-  openDrawer(t('history'), el('p', { class: 'muted' }, '…'));
-  let list = [];
-  try { list = await call('history_list'); } catch { await refreshConversations(); list = state.conversations || []; }
-  if (!list.length) return openDrawer(t('history'), el('p', { class: 'muted' }, t('noHistory')));
-  openDrawer(t('history'), list.map((c) => el('div', { class: 'card item click', onclick: async () => { closeDrawer(); loadState(await call('load_conversation', { id: c.id })); } },
-    el('div', { class: 'row' }, el('div', { class: 't grow' }, c.kind === 'scheduled' ? `⏰ ${c.title}` : c.title),
-      el('button', { class: 'icon-btn', 'aria-label': t('delete'), onclick: async (e) => { e.stopPropagation(); loadState(await call('delete_conversation', { id: c.id })); $('#btnHistory').click(); } }, '×')),
-    el('div', { class: 's' }, `${fmt(c.updatedAt)} · ${t(c.status) || c.status || ''}${c.cost > 0 ? ` · ${money(c.cost, c.currency)}` : ''}${c.remote ? ` · ${t('fromAccount')}` : ''}`))));
+  const list = el('div', { id: 'historyList' }, el('p', { class: 'muted' }, '…'));
+  const more = el('button', { class: 'btn', hidden: true }, t('loadMore'));
+  const search = el('input', { type: 'search', id: 'historySearch', placeholder: t('searchHistory'), style: 'width:100%;margin-bottom:8px' });
+  let q = '';
+  let next = 0;
+  let seen = new Set();
+  const load = async (reset) => {
+    if (reset) { next = 0; seen = new Set(); }
+    let page = { items: [], more: false, next: 0 };
+    try { page = await call('history_list', { q, offset: next, paged: true }); } catch { await refreshConversations(); page.items = state.conversations || []; }
+    const fresh = page.items.filter((c) => !seen.has(c.id));
+    fresh.forEach((c) => seen.add(c.id));
+    if (reset) list.replaceChildren(...(fresh.length ? fresh.map(historyItem) : [el('p', { class: 'muted' }, q ? t('noMatches') : t('noHistory'))]));
+    else list.append(...fresh.map(historyItem));
+    next = page.next;
+    more.hidden = !page.more;
+  };
+  let timer = null;
+  search.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { q = search.value.trim(); load(true); }, 300); });
+  more.addEventListener('click', () => load(false));
+  openDrawer(t('history'), [search, list, more]);
+  search.focus();
+  await load(true);
 });
 
 // ---------------- costs ----------------

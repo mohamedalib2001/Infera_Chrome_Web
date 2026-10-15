@@ -17,6 +17,7 @@ import { signOut, authStatus, inferaSignIn, refreshInferaAccount, inferaServer, 
 import { spentToday } from './spend.js';
 import { overlay } from './page.js';
 import { executeTool } from './tools/executor.js';
+import { buildFile } from './tools/files.js';
 import { listMemory, forgetMemory, clearMemory } from './memory.js';
 import { listServers, saveServer, deleteServer } from './remote-mcp.js';
 
@@ -248,12 +249,18 @@ async function handlePanel(msg, s, port) {
     case 'state': return panelState(s);
     case 'cost_log': return costLog(msg.days);
     case 'history_list': {
-      // This browser's conversations plus those saved in the account from other devices.
-      const local = (await getLocal(STORAGE_KEYS.CONVERSATIONS, [])).map(({ id, title, updatedAt, status, kind, cost, currency }) => ({ id, title, updatedAt, status, kind, cost, currency }));
-      const remote = (await getSettings()).syncHistory === false ? [] : await inferaConversations('list').catch(() => []);
+      // This browser's conversations plus those saved in the account from other devices;
+      // q searches titles and contents, offset pages through the account's older ones.
+      const q = String(msg.q || '').trim().toLowerCase();
+      const offset = Math.max(0, Number(msg.offset) || 0);
+      const PAGE = 50;
+      const matches = (c) => !q || String(c.title || '').toLowerCase().includes(q) || JSON.stringify(c.messages || []).toLowerCase().includes(q);
+      const local = offset ? [] : (await getLocal(STORAGE_KEYS.CONVERSATIONS, [])).filter(matches).map(({ id, title, updatedAt, status, kind, cost, currency }) => ({ id, title, updatedAt, status, kind, cost, currency }));
+      const remote = (await getSettings()).syncHistory === false ? [] : await inferaConversations('list', null, { q, limit: PAGE, offset }).catch(() => []);
       const byId = new Map(local.map((c) => [c.id, c]));
       for (const r of remote || []) if (!byId.has(r.id)) byId.set(r.id, { ...r, kind: 'panel', remote: true });
-      return [...byId.values()].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      const items = [...byId.values()].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      return msg.paged ? { items, more: (remote || []).length === PAGE, next: offset + PAGE } : items;
     }
     case 'set_budgets': {
       const patch = {};
@@ -399,7 +406,7 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
 
 // Test/debug hook (used by scripts/e2e.mjs; harmless in production).
 self.__infera = {
-  AgentSession, executeTool, tabGroups, permissions, sessions, sessionForWindow, nativeBridge, classifyUrl, getSettings, updateSettings,
+  AgentSession, executeTool, buildFile, tabGroups, permissions, sessions, sessionForWindow, nativeBridge, classifyUrl, getSettings, updateSettings,
   // A side-panel message without a panel (tests).
   panelCall: async (windowId, msg) => handlePanel(msg, await sessionForWindow(windowId), { postMessage() {} }),
   // A settings-page message (tests).
