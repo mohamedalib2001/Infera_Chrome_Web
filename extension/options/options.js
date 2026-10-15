@@ -35,7 +35,7 @@ const L = {
     blocklist: 'Personal blocklist', blocklistHint: 'One domain per line. Infera will never open or act on these sites (subdomains included). Banking, trading, crypto, adult and piracy sites are blocked by default.',
     connections: 'Connections', native: 'Infera Code / Desktop (native messaging)', reconnect: 'Reconnect', relay: 'Cloud bridge relay (for cloud-hosted sessions)', relayUrl: 'Relay URL (wss://…)', relayOn: 'Enable cloud bridge',
     classifier: 'Remote domain classifier URL (optional, use {domain})', nativeHelp: 'Install the native host so Infera Code or any MCP client can drive this browser:',
-    policy: 'Organization policy', policyHint: 'Managed by your administrator (read-only).', noPolicy: 'No organization policy is applied.',
+    policy: 'Organization policy', policyHint: 'Managed by your administrator (read-only).',
     mic: 'Microphone access for workflow narration', micBtn: 'Allow microphone', micOk: 'Microphone allowed. You can close this tab.',
     save: 'Save', saved: 'Saved ✓',
     remote: 'Remote MCP servers', remoteHint: 'Tools from these MCP servers (Streamable HTTP) are offered to the agent. Every call asks for the REMOTE_MCP permission unless you allow the server.',
@@ -60,7 +60,7 @@ const L = {
     blocklist: 'قائمة الحظر الشخصية', blocklistHint: 'نطاق في كل سطر. لن يفتح إنفرا هذه المواقع أو يعمل عليها (بما فيها النطاقات الفرعية). مواقع البنوك والتداول والعملات المشفرة والمحتوى الإباحي والمقرصن محظورة افتراضيًا.',
     connections: 'الاتصالات', native: 'إنفرا كود / سطح المكتب (Native Messaging)', reconnect: 'إعادة الاتصال', relay: 'جسر سحابي (للجلسات المستضافة في السحابة)', relayUrl: 'رابط الجسر (wss://…)', relayOn: 'تفعيل الجسر السحابي',
     classifier: 'رابط مصنّف النطاقات البعيد (اختياري، استخدم {domain})', nativeHelp: 'ثبّت المضيف الأصلي ليتمكن إنفرا كود أو أي عميل MCP من التحكم في هذا المتصفح:',
-    policy: 'سياسة المؤسسة', policyHint: 'يديرها المسؤول (للقراءة فقط).', noPolicy: 'لا توجد سياسة مؤسسية مطبّقة.',
+    policy: 'سياسة المؤسسة', policyHint: 'يديرها المسؤول (للقراءة فقط).',
     mic: 'الوصول إلى الميكروفون لسرد سير العمل', micBtn: 'السماح بالميكروفون', micOk: 'تم السماح بالميكروفون. يمكنك إغلاق هذا التبويب.',
     save: 'حفظ', saved: 'تم الحفظ ✓',
     remote: 'خوادم MCP البعيدة', remoteHint: 'تُعرض أدوات هذه الخوادم (Streamable HTTP) على الوكيل، وكل استدعاء يطلب إذن REMOTE_MCP ما لم تسمح للخادم دائمًا.',
@@ -227,12 +227,11 @@ async function render() {
       try { await send('save_mcp_server', { server: { name: sName.value, url: sUrl.value, headers: sAuth.value.trim() ? { authorization: sAuth.value.trim() } : {} } }); render(); } catch (e) { alert(e.message); }
     } }, tr('add')))));
 
-  // Policy
+  // Policy: shown only where an IT administrator deploys the extension with managed settings.
   const keys = Object.keys(policy || {});
-  app.append(el('section', { class: 'card' },
-    el('h2', {}, tr('policy')), el('p', { class: 'muted' }, keys.length ? tr('policyHint') : tr('noPolicy')),
-    keys.length ? el('pre', { class: 'cmd' }, JSON.stringify(policy, null, 2)) : null,
-    el('p', { class: 'muted', style: 'font-size:12px;margin:10px 0 0' }, `Extension ID: ${chrome.runtime.id} · v${chrome.runtime.getManifest().version}`)));
+  if (keys.length) app.append(el('section', { class: 'card', id: 'policy' },
+    el('h2', {}, tr('policy')), el('p', { class: 'muted' }, tr('policyHint')),
+    el('pre', { class: 'cmd' }, JSON.stringify(policy, null, 2))));
 
   // About and legal: the registered company behind the extension (UK trading disclosures).
   const link = (href, text) => el('a', { href, target: '_blank', rel: 'noopener' }, text);
@@ -242,7 +241,8 @@ async function render() {
     el('p', {}, companyLine(currentLang())),
     el('p', {}, link(COMPANY.privacyUrl, tr('privacyPolicy')), ' · ', link(COMPANY.termsUrl, tr('terms')), ' · ', link(COMPANY.website, COMPANY.website.replace('https://', ''))),
     el('p', { class: 'muted' }, `${tr('supportMail')}: `, mail(COMPANY.emails.support), ' · ', `${tr('privacyMail')}: `, mail(COMPANY.emails.privacy)),
-    el('p', { class: 'muted', style: 'font-size:12px' }, tr('ico'))));
+    el('p', { class: 'muted', style: 'font-size:12px' }, tr('ico')),
+    el('p', { class: 'muted', style: 'font-size:12px;margin:10px 0 0' }, `Extension ID: ${chrome.runtime.id} · v${chrome.runtime.getManifest().version}`)));
 }
 
 render();
