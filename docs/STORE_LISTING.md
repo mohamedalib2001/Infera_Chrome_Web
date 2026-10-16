@@ -113,6 +113,7 @@ to EU users, as the Digital Services Act requires.
 | Publisher display name | Infera Engine Ltd |
 | Trader status | Trader (a business) |
 | Legal name | Infera Engine Ltd (private company limited by shares, England and Wales, company no. 17520775) |
+| Data protection | Registered with the UK ICO as a data controller, reference ZC275369 (expires 14 October 2027) |
 | Address | 128 City Road, London, EC1V 2NX, United Kingdom |
 | Email (verified) | support@inferaengine.com |
 | Phone (verified) | the company's phone number (to be added by the owner) |

@@ -1,7 +1,7 @@
 # Privacy Policy — Infera Agent for Chrome
 # سياسة الخصوصية — إنفرا إيجنت للمتصفح
 
-_Last updated: 15 October 2026 — آخر تحديث: 15 أكتوبر 2026_
+_Last updated: 16 October 2026 — آخر تحديث: 16 أكتوبر 2026_
 
 This policy covers the browser extension **Infera Agent for Chrome**. It is part of the Infera Agent
 service. The full service policy is published at **https://inferaagent.com/privacy**: its section 11a
@@ -13,7 +13,9 @@ ever differ, the published service policy prevails.
 **Infera Engine Ltd** is a private company limited by shares, registered in England and Wales under
 company number **17520775**. Its registered office is at 128 City Road, London EC1V 2NX, United
 Kingdom. It develops, publishes and operates Infera Agent and this extension, and is the controller of
-your personal data under the UK GDPR and the Data Protection Act 2018.
+your personal data under the UK GDPR and the Data Protection Act 2018. It is registered with the UK
+Information Commissioner's Office (ICO) as a data controller under registration reference **ZC275369**
+([public register entry](https://ico.org.uk/ESDWebPages/Entry/ZC275369)).
 
 * Privacy and data requests: **privacy@inferaengine.com**
 * Support: support@inferaengine.com · Security reports: security@inferaengine.com
@@ -130,7 +132,8 @@ before a material change takes effect.
 **المسؤول عن البيانات:** شركة **Infera Engine Ltd**، شركة خاصة محدودة بالأسهم مسجّلة في إنجلترا وويلز
 برقم الشركة **17520775**، ومقرها المسجّل في 128 City Road, London EC1V 2NX, United Kingdom. تطوّر
 الشركة إنفرا إيجنت وتنشر هذه الإضافة وتشغّلها، وفق اللائحة العامة لحماية البيانات في المملكة المتحدة
-(UK GDPR) وقانون حماية البيانات لعام 2018. للخصوصية وطلبات البيانات: **privacy@inferaengine.com**.
+(UK GDPR) وقانون حماية البيانات لعام 2018، ومسجّلة لدى مكتب مفوّض المعلومات (ICO) كجهة متحكّمة في
+البيانات برقم التسجيل **ZC275369**. للخصوصية وطلبات البيانات: **privacy@inferaengine.com**.
 
 تنفّذ الإضافة المهام التي تطلبها فقط، ولا تعمل في الخلفية دون مهمة منك.
 

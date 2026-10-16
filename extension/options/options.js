@@ -1,6 +1,6 @@
 // Infera Agent — settings page.
 import { setLanguage, currentLang, MODE_LABEL, t } from '../lib/i18n.js';
-import { COMPANY, companyLine } from '../lib/company.js';
+import { COMPANY, companyLine, icoLine } from '../lib/company.js';
 
 const $ = (s) => document.querySelector(s);
 const send = (type, extra = {}) => chrome.runtime.sendMessage({ type, ...extra }).then((r) => { if (r?.error) throw new Error(r.error); return r?.data; });
@@ -239,6 +239,7 @@ async function render() {
   app.append(el('section', { class: 'card', id: 'about' },
     el('h2', {}, tr('about')), el('p', { class: 'muted' }, tr('aboutHint')),
     el('p', {}, companyLine(currentLang())),
+    el('p', { class: 'muted', id: 'icoReg' }, link(COMPANY.ico.url, icoLine(currentLang()))),
     el('p', {}, link(COMPANY.privacyUrl, tr('privacyPolicy')), ' · ', link(COMPANY.termsUrl, tr('terms')), ' · ', link(COMPANY.website, COMPANY.website.replace('https://', ''))),
     el('p', { class: 'muted' }, `${tr('supportMail')}: `, mail(COMPANY.emails.support), ' · ', `${tr('privacyMail')}: `, mail(COMPANY.emails.privacy)),
     el('p', { class: 'muted', style: 'font-size:12px' }, tr('ico')),
