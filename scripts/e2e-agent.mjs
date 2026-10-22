@@ -179,6 +179,42 @@ const server = http.createServer((req, res) => {
           { type: 'content_block_stop', index: 0 },
           { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }]);
       }
+      if (phase === 'steps') {
+        // A planned task: the step list, one browser action, a verified step, then the answer.
+        const k = j.messages.filter((m) => m.role === 'assistant').length;
+        const tu = (index, id, name, input) => [
+          { type: 'content_block_start', index, content_block: { type: 'tool_use', id, name, input: {} } },
+          { type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: JSON.stringify(input) } },
+          { type: 'content_block_stop', index },
+        ];
+        if (k === 0) {
+          return setTimeout(() => sse(res, [start('st1'),
+            ...tu(0, 'st_plan', 'task_steps', { action: 'plan', steps: ['Open the site', 'Fill in the form', 'Submit and verify'] }),
+            ...tu(1, 'st_go', 'task_steps', { action: 'start', step: 1 }),
+            ...tu(2, 'st_wait', 'computer', { action: 'wait', duration: 0, tabId: globalThis.TAB }),
+            { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 30 } }, { type: 'message_stop' }]), 150);
+        }
+        if (k === 1) {
+          return sse(res, [start('st2'),
+            ...tu(0, 'st_done', 'task_steps', { action: 'done', step: 1, note: 'Order form open' }),
+            ...tu(1, 'st_replan', 'task_steps', { action: 'plan', steps: ['Open the site', 'Fill in the form', 'Upload the file', 'Submit and verify'] }),
+            { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 10 } }, { type: 'message_stop' }]);
+        }
+        return sse(res, [start('st3'),
+          { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+          { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'All done. Verified: confirmation shown.' } },
+          { type: 'content_block_stop', index: 0 },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }]);
+      }
+      if (phase === 'overload' && j.model === 'claude-opus-5-5') {
+        res.writeHead(529, { 'content-type': 'application/json', 'retry-after': '0.01' });
+        return res.end(JSON.stringify({ type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }));
+      }
+      if (phase === 'overload') return sse(res, [start('ov1'),
+        { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+        { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Answered by the next model.' } },
+        { type: 'content_block_stop', index: 0 },
+        { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }]);
       if (phase === 'budget') {
         // Every call costs 0.40 SAR (reported by the gateway after message_stop) and asks for one more step.
         return sse(res, [start('bg' + n),
@@ -339,12 +375,14 @@ const page = await ctx.newPage();
 await page.goto(`${base}/test.html`);
 const tabId = await sw.evaluate(async (u) => (await chrome.tabs.query({ url: u + '*' }))[0].id, `${base}/test.html`);
 globalThis.TAB = tabId;
+// A fresh install starts on the Auto operating mode (existing installs keep their model).
+const installMode = await sw.evaluate(async () => (await chrome.storage.local.get('settings')).settings?.operatingMode);
 
 const run = (model, { classic = true } = {}) => sw.evaluate(async ({ base, tabId, model, classic }) => {
   const I = self.__infera;
   // Signed in with an INFERA Agent session against the local mock gateway.
   await chrome.storage.local.set({ auth: { kind: 'infera', server: base, accessToken: 'inf_test', clientId: 'c1' } });
-  await I.updateSettings({ apiKey: 'sk-ignored', apiBaseUrl: 'https://api.anthropic.com', inferaUrl: base, model, permissionMode: 'skip_all_permission_checks', safetyChecker: false, sound: false, notifications: false });
+  await I.updateSettings({ apiKey: 'sk-ignored', apiBaseUrl: 'https://api.anthropic.com', inferaUrl: base, model, permissionMode: 'skip_all_permission_checks', safetyChecker: false, sound: false, notifications: false, operatingMode: 'manual' });
   const s = new I.AgentSession({ kind: 'panel' });
   s.classicTools = classic; // our own browsing tools instead of Anthropic's browser toolset
   const events = [];
@@ -355,6 +393,8 @@ const run = (model, { classic = true } = {}) => sw.evaluate(async ({ base, tabId
 
 const checks = [];
 const check = (name, ok, info = '') => checks.push({ name, ok, info });
+// A crash part-way still reports what passed and failed before it.
+process.on('uncaughtException', (e) => { for (const c of checks) console.log(`${c.ok ? 'PASS' : 'FAIL'}  ${c.name}${c.ok ? '' : `  (${c.info})`}`); console.error(e); process.exit(1); });
 
 const r1 = await run('claude-opus-5');
 check('agent status done', r1.status === 'done', r1.status);
@@ -371,7 +411,7 @@ check('long history: summarized on the server at 250k tokens (compaction), outpu
 check('task named for the cost log', decodeURIComponent(requests[0].headers['x-infera-task'] || '') === 'What is on this page?');
 const t0 = requests[0].body.tools;
 check('tools: web search/fetch first, own tools w/ eager streaming, memory, cache_control',
-  t0.length === 33 && t0.some((t) => t.name === 'export_file') && t0.some((t) => t.name === 'delegate_tasks') && t0.some((t) => t.name === 'task_notes') && t0.some((t) => t.name === 'memory_search') && t0[0].type === 'web_search_20260318' && t0[0].response_inclusion === 'excluded' && t0[1].type === 'web_fetch_20260318'
+  t0.length === 34 && t0.some((t) => t.name === 'task_steps') && t0.some((t) => t.name === 'export_file') && t0.some((t) => t.name === 'delegate_tasks') && t0.some((t) => t.name === 'task_notes') && t0.some((t) => t.name === 'memory_search') && t0[0].type === 'web_search_20260318' && t0[0].response_inclusion === 'excluded' && t0[1].type === 'web_fetch_20260318'
   && !t0[0].eager_input_streaming && t0[2].eager_input_streaming === true && t0.some((t) => t.name === 'memory_save') && t0.some((t) => t.name === 'all_tabs') && !!t0.at(-1).cache_control,
   t0.map((t) => t.name || t.type).join(','));
 check('tab context in first user msg', JSON.stringify(requests[0].body.messages[0]).includes('<tab_context>'));
@@ -558,6 +598,84 @@ const restored = await sw.evaluate(async () => {
 });
 check('panel returns to the same conversation after a restart', restored.same && restored.msgs === 2 && restored.title === 'Restore me', JSON.stringify(restored));
 
+// Live steps, pause and take over: the plan is shown and kept on replanning; taking over
+// holds the next step and skips the browser action planned before it; giving control
+// back tells the model to look at the page again.
+requests.length = 0;
+phase = 'steps';
+const steps = await sw.evaluate(async ({ tabId }) => {
+  const fresh = (await chrome.storage.local.get('settings')).settings?.operatingMode;
+  const s = new self.__infera.AgentSession({ kind: 'panel' });
+  s.classicTools = true;
+  s.modelOverride = 'claude-opus-5-5';
+  const statuses = [];
+  const stepEvents = [];
+  let held = null;
+  let turns = 0;
+  s.subscribe((e) => {
+    if (e.type === 'assistant_start') turns++;
+    if (e.type === 'status') statuses.push(e.status);
+    if (e.type === 'steps') {
+      stepEvents.push(e.steps.map((x) => `${x.title}:${x.status}`).join('|'));
+      if (stepEvents.length === 1) s.pause({ takeOver: true });
+    }
+  });
+  const run = s.run('Place the order', { startTabId: tabId });
+  await new Promise((r) => setTimeout(r, 700));
+  held = { status: s.status, turns };
+  const resumed = s.resume();
+  await run;
+  return { status: s.status, statuses, stepEvents, held, resumed, steps: s.steps, summary: s.summary(), fresh };
+}, { tabId });
+const sReq = requests.map((r) => JSON.stringify(r.body.messages.at(-1)));
+check('steps: plan shown live, replan keeps the verified step', steps.stepEvents[0] === 'Open the site:pending|Fill in the form:pending|Submit and verify:pending'
+  && steps.steps.length === 4 && steps.steps[0].status === 'done' && steps.steps[0].note === 'Order form open' && steps.steps[2].title === 'Upload the file' && steps.summary.steps.length === 4, JSON.stringify(steps.steps));
+check('new installs start on the Auto operating mode', installMode === 'auto', String(installMode));
+check('take over: holds the next step while the user works', steps.held.status === 'paused' && steps.held.turns === 1 && steps.statuses.includes('paused') && steps.resumed, JSON.stringify({ held: steps.held, n: requests.length, st: steps.statuses }));
+check('take over: the browser action planned before it is not run; the model is told to look again',
+  /Not run: the user took over the browser/.test(sReq[1] || '') && /took over the browser for a while and has now given control back/.test(sReq[1] || ''), (sReq[1] || '').slice(0, 400));
+check('steps: task completes after resume', steps.status === 'done' && requests.length === 3, `${steps.status} ${requests.length}`);
+check('prompt: verify before done, never submit twice', /Verify, don't assume/.test(JSON.stringify(requests[0].body.system)) && /Never submit the same form or request twice/.test(JSON.stringify(requests[0].body.system)));
+
+// Operating modes: Auto picks the model and effort from the request; Power and Fast are fixed; a busy
+// model fails over before the first answer.
+phase = 'plain';
+const routed = await sw.evaluate(async ({ tabId }) => {
+  const I = self.__infera;
+  const out = {};
+  for (const [mode, text] of [['auto', 'What is on this page?'], ['auto', 'Open the CRM, sign in, and for each lead in the list fill in the follow-up form and submit it'], ['power', 'hi'], ['fast', 'hi']]) {
+    await I.updateSettings({ operatingMode: mode });
+    const s = new I.AgentSession({ kind: 'panel' });
+    s.classicTools = true;
+    let route = null;
+    s.subscribe((e) => { if (e.type === 'routed') route = e; });
+    await s.run(text, { startTabId: tabId });
+    out[`${mode}:${text.slice(0, 12)}`] = { route, status: s.status, model: s.lastModel };
+  }
+  out.stats = await chrome.storage.local.get('routeStats');
+  return out;
+}, { tabId });
+const rq = requests.slice(-4).map((r) => `${r.body.model}/${r.body.output_config?.effort || '-'}`);
+check('auto: a quick question goes to Fast (Sonnet 5, low effort)', rq[0] === 'claude-sonnet-5/low' && routed['auto:What is on t'].route?.mode === 'fast', `${rq[0]} ${JSON.stringify(routed['auto:What is on t'].route)}`);
+check('auto: a multi-step form task goes to Power (Opus 5.5, high effort)', rq[1] === 'claude-opus-5-5/high' && routed['auto:Open the CRM'].route?.reason === 'multi-step actions', `${rq[1]}`);
+check('modes: Power and Fast are fixed choices', rq[2] === 'claude-opus-5-5/high' && rq[3] === 'claude-sonnet-5/low', rq.join(' '));
+check('auto: outcomes recorded per mode', routed.stats.routeStats?.fast?.length >= 2 && routed.stats.routeStats?.power?.length >= 2, JSON.stringify(routed.stats));
+requests.length = 0;
+phase = 'overload';
+const over = await sw.evaluate(async ({ tabId }) => {
+  const I = self.__infera;
+  await I.updateSettings({ operatingMode: 'power' });
+  const s = new I.AgentSession({ kind: 'panel' });
+  s.classicTools = true;
+  const infos = [];
+  s.subscribe((e) => { if (e.type === 'info') infos.push(e.message); });
+  await s.run('hi', { startTabId: tabId });
+  await I.updateSettings({ operatingMode: 'manual' });
+  return { status: s.status, model: s.lastModel, infos };
+}, { tabId });
+check('failover: a busy model hands the new task to the next one', over.status === 'done' && over.model === 'claude-opus-5' && requests.at(-1).body.model === 'claude-opus-5' && /busy right now/.test(over.infos.join(' ')), JSON.stringify({ ...over, n: requests.length }));
+phase = 'normal';
+
 // Costs: each call's charge is reported; the task limit asks; the daily limit stops.
 requests.length = 0;
 phase = 'budget';
@@ -603,34 +721,84 @@ const pageErrors = [];
 sp.on('pageerror', (e) => pageErrors.push(e.message));
 await sp.goto(`chrome-extension://${extId}/sidepanel/sidepanel.html`);
 await sp.waitForTimeout(800);
+await sp.locator('#btnNew').click();
+await sp.waitForTimeout(400);
 await sp.screenshot({ path: path.join(outDir, 'sidepanel-empty.png') });
+check('home: quick actions and quick tasks', (await sp.locator('#examples .qa').count()) === 9 && (await sp.locator('#quickTasks .qt').count()) === 6);
+await sp.locator('#examples .qa[data-qa="extract"]').click();
+check('home: a quick action prefills the request', /table|الجدول/.test(await sp.locator('#input').inputValue()));
+await sp.locator('#input').fill('');
 await sp.locator('#btnHistory').click();
-await sp.waitForTimeout(300);
-const historyCount = await sp.locator('.drawer-body .item').count();
-check('history lists saved conversations', historyCount >= 2, String(historyCount));
-await sp.locator('.drawer-body .item').last().click(); // the tool-calling (non-Quick-Mode) conversation
+await sp.waitForTimeout(400);
+const historyCount = await sp.locator('.drawer-body .hcard').count();
+check('history lists saved conversations as task cards with filters', historyCount >= 2 && (await sp.locator('#historyStatus option').count()) === 6 && (await sp.locator('#historySite').count()) === 1, String(historyCount));
+await sp.screenshot({ path: path.join(outDir, 'sidepanel-history.png') });
+await sp.locator('#historyStatus').selectOption('done');
+await sp.waitForTimeout(100);
+const doneOnly = await sp.locator('.drawer-body .hcard').count();
+check('history: status filter', doneOnly >= 1 && doneOnly <= historyCount, `${doneOnly}/${historyCount}`);
+await sp.locator('#historyStatus').selectOption('');
+await sp.locator('#historySearch').fill('Place the order');
+await sp.waitForTimeout(700);
+await sp.locator('.drawer-body .hcard').first().click();
 await sp.waitForTimeout(500);
 await sp.screenshot({ path: path.join(outDir, 'sidepanel-conversation.png') });
 check('conversation renders tool cards', (await sp.locator('.tool').count()) > 0);
-await sp.locator('#btnShortcuts').click();
+await sp.locator('#btnLive').click();
+await sp.waitForTimeout(300);
+await sp.screenshot({ path: path.join(outDir, 'sidepanel-live.png') });
+check('execution center: the saved steps with their status, and the finished-task actions',
+  (await sp.locator('#liveSteps .step').count()) === 4 && (await sp.locator('#liveSteps .step.done').count()) === 1 && (await sp.locator('#liveExport').count()) === 1 && (await sp.locator('#livePill').innerText()).length > 0);
+await sp.locator('#liveClose').click();
+await sp.locator('#btnStudio').click();
+await sp.waitForTimeout(300);
+await sp.locator('#wfNew').click();
 await sp.waitForTimeout(200);
-await sp.locator('.drawer-body .btn.primary').first().click();
+await sp.locator('#wfCommand').fill('weekly-report');
+await sp.locator('#wfSteps textarea').first().fill('Open {{site}} and sign in');
+await sp.locator('#drawerBody button', { hasText: /Add step|إضافة خطوة/ }).click();
+await sp.locator('#wfSteps .wfe-step').nth(1).locator('select').selectOption('each');
+await sp.locator('#wfSteps textarea').nth(1).fill('row in the report table, copy its total');
+await sp.screenshot({ path: path.join(outDir, 'sidepanel-workflow-editor.png') });
+await sp.locator('#wfSave').click();
+await sp.waitForTimeout(400);
+const savedWf = await sw.evaluate(async () => ((await chrome.storage.local.get('shortcuts')).shortcuts || []).find((x) => x.command === 'weekly-report'));
+check('workflow studio: steps with kinds and variables are saved and compiled', savedWf?.steps?.length === 2 && savedWf.steps[1].kind === 'each'
+  && savedWf.prompt === '1. Open {{site}} and sign in\n2. For each row in the report table, copy its total' && savedWf.params?.[0]?.name === 'site', JSON.stringify(savedWf));
+await sp.locator('#studio_templates').click();
 await sp.waitForTimeout(200);
-await sp.screenshot({ path: path.join(outDir, 'sidepanel-shortcut.png') });
-await sp.locator('#drawerClose').click();
+check('workflow studio: ready-made templates', (await sp.locator('#drawerBody .wf').count()) === 6);
+await sp.locator('#drawerBody .wf .btn.primary').first().click();
+await sp.waitForTimeout(200);
+check('workflow studio: a template opens in the editor', (await sp.locator('#wfSteps .wfe-step').count()) === 5);
+await sp.screenshot({ path: path.join(outDir, 'sidepanel-studio.png') });
 await sp.locator('#btnCosts').click();
 await sp.waitForSelector('.cost-stats', { timeout: 5000 }).catch(() => {});
 await sp.waitForTimeout(300);
 await sp.screenshot({ path: path.join(outDir, 'sidepanel-costs-top.png') });
+check('usage: total for the period, chart and the split by model', /0\.61/.test(await sp.locator('#costTotal .v').innerText()) && (await sp.locator('#costTotal .bars .b').count()) === 24
+  && (await sp.locator('#costModels .mrow').count()) === 2, await sp.locator('#costTotal').innerText().catch(() => ''));
+await sp.locator('#costPeriod button').nth(2).click();
+check('usage: month view has a bar per day', (await sp.locator('#costTotal .bars .b').count()) === 30);
 await sp.locator('.ops summary').click().catch(() => {});
 await sp.screenshot({ path: path.join(outDir, 'sidepanel-costs.png'), fullPage: true });
 check('Costs tab: totals, limits, tasks and the operations log', (await sp.locator('.cost-stats .stat').count()) === 3 && (await sp.locator('.ops-table tr').count()) === 3 && (await sp.locator('#drawerBody .card.item').count()) === 2);
 const dayField = sp.locator('#drawerBody input[type=number]').nth(1);
 const shownDaily = await dayField.inputValue();
 await dayField.fill('7');
-await sp.locator('#drawerBody .btn.primary').first().click();
+await sp.locator('#saveLimits').click();
 await sp.waitForTimeout(500);
 check('Costs tab: the daily limit is the account\'s, saved on the server', shownDaily === '2' && globalThis.LIMIT === 7, `${shownDaily} ${globalThis.LIMIT}`);
+// Arabic, right to left
+await sw.evaluate(() => self.__infera.updateSettings({ language: 'ar' }));
+await sp.reload();
+await sp.waitForTimeout(800);
+check('arabic: right-to-left with translated home', (await sp.evaluate(() => document.documentElement.dir)) === 'rtl' && /اكتب ما تريد/.test(await sp.locator('#empty h2').innerText()));
+await sp.screenshot({ path: path.join(outDir, 'sidepanel-ar.png') });
+await sp.locator('#btnCosts').click();
+await sp.waitForTimeout(500);
+await sp.screenshot({ path: path.join(outDir, 'sidepanel-costs-ar.png') });
+await sw.evaluate(() => self.__infera.updateSettings({ language: 'auto' }));
 check('side panel has no page errors', pageErrors.length === 0, pageErrors.join('; '));
 // Microphone refused: one settings tab, no restart loop (it used to open a tab per retry).
 const mic = await ctx.newPage();
@@ -645,9 +813,11 @@ await mic.waitForTimeout(800);
 await mic.goto(`${base}/test.html`);
 await mic.goto(`chrome-extension://${extId}/sidepanel/sidepanel.html`);
 await mic.waitForTimeout(600);
-await mic.locator('#btnRecord').click();
+await mic.locator('#btnStudio').click();
 await mic.waitForTimeout(300);
-await mic.locator('#drawerBody .btn.primary').first().click();
+await mic.locator('#studio_record').click();
+await mic.waitForTimeout(300);
+await mic.locator('#recStart').click();
 await mic.waitForTimeout(2500);
 const micTabs = ctx.pages().filter((pg) => pg.url().includes('options/options.html')).length;
 const starts = await mic.evaluate(() => globalThis.__starts);
@@ -788,6 +958,14 @@ await op.goto(`chrome-extension://${extId}/options/options.html`);
 await op.waitForTimeout(800);
 await op.screenshot({ path: path.join(outDir, 'options.png'), fullPage: true });
 check('options page renders', (await op.locator('section.card').count()) >= 5);
+check('settings: models & performance with the four operating modes and the section navigation',
+  (await op.locator('#models .op-card').count()) === 4 && (await op.locator('#models .model-row').count()) >= 6 && (await op.locator('#nav .nav-link').count()) >= 8);
+await op.locator('#models .op-card[data-op="balanced"]').click();
+await op.waitForTimeout(500);
+const opSet = await sw.evaluate(async () => (await chrome.storage.local.get('settings')).settings.operatingMode);
+check('settings: choosing an operating mode saves it', opSet === 'balanced' && (await op.locator('#models .op-card.on').getAttribute('data-op')) === 'balanced', opSet);
+await op.screenshot({ path: path.join(outDir, 'options-models.png') });
+await sw.evaluate(() => self.__infera.updateSettings({ operatingMode: 'manual' }));
 const about = await op.locator('#about').innerText().catch(() => '');
 check('settings: the team applying its rules is shown', /Acme Owner/.test(await op.locator('#teamPolicy').innerText().catch(() => '')));
 check('settings: the registered company (UK trading disclosure) and legal links', /Infera Engine Ltd/.test(about) && /17520775/.test(about) && /128 City Road/.test(about) && /ZC275369/.test(about) && /privacy@inferaengine\.com/.test(about)

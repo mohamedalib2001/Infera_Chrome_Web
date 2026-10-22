@@ -4,10 +4,14 @@ import { STORAGE_KEYS, DEFAULT_MODEL, PERMISSION_MODES } from './constants.js';
 export const DEFAULT_SETTINGS = {
   inferaUrl: '',   // unpacked developer builds only: a local test server (see auth.js)
   model: DEFAULT_MODEL,
+  // auto | fast | balanced | power pick the model per task; manual uses `model` as chosen.
+  // Existing installs keep their chosen model; new installs start on auto (service worker).
+  operatingMode: 'manual',
   effort: 'medium',   // Opus 5.5 at medium beats Opus 5 at high, for far fewer tokens
   permissionMode: PERMISSION_MODES.AUTO,
   safetyChecker: true,
   language: 'auto',
+  theme: 'dark',       // dark | light | auto (follow the system)
   notifications: true,
   sound: true,
   userBlocklist: [],

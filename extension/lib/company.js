@@ -1,4 +1,4 @@
-// The company that publishes and operates Infera Agent for Chrome: its public
+// The company that publishes and operates Infera Agent Web: its public
 // Companies House facts (England & Wales), the same as the platform's own record
 // (apps/server/src/company.ts on inferaagent.com). A UK limited company shows its
 // registered name, number, place of registration and registered office wherever it

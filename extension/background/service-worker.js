@@ -21,6 +21,7 @@ import { buildFile } from './tools/files.js';
 import { ACCOUNT_ALARM, orgPolicy, refreshOrgPolicy, pollAccountTasks } from './account-sync.js';
 import { listMemory, forgetMemory, clearMemory } from './memory.js';
 import { listServers, saveServer, deleteServer } from './remote-mcp.js';
+import { routeTask, routeStats, MODE_IDS } from './router.js';
 
 // ---------------- session registry ----------------
 const sessions = new Map();        // sessionId -> AgentSession
@@ -98,6 +99,7 @@ chrome.runtime.onInstalled.addListener(async (d) => {
   await rearmAll();
   // First run: the side panel shows the Infera Agent sign-in; the settings page
   // is only needed when no Infera Agent server is built in.
+  if (d.reason === 'install') await updateSettings({ operatingMode: 'auto' });
   if (d.reason === 'install' && !(await inferaServer())) chrome.runtime.openOptionsPage();
 });
 chrome.runtime.onStartup.addListener(() => rearmAll());
@@ -146,7 +148,8 @@ async function panelState(s) {
     session: s.summary(),
     messages: s.messages,
     pending: [],
-    settings: { model: s.modelOverride || settings.model, permissionMode: s.modeOverride || settings.permissionMode, language: settings.language },
+    settings: { model: s.modelOverride || settings.model, permissionMode: s.modeOverride || settings.permissionMode, language: settings.language, operatingMode: s.modelOverride ? 'manual' : settings.operatingMode, theme: settings.theme || 'dark' },
+    route: s.route || null,
     canChangeServer: false,
     models: MODELS,
     modes: Object.values(PERMISSION_MODES).filter((m) => !(policy.disableSkipAllApprovals && m === PERMISSION_MODES.SKIP_ALL)),
@@ -180,17 +183,20 @@ async function handlePanel(msg, s, port) {
   switch (msg.type) {
     case 'send': {
       // While a task runs, a new message joins it: the agent reads it at its next step.
-      if (s.status === 'running' || s.status === 'waiting') { s.enqueue(msg.text, msg.attachments || []); return { ok: true, queued: true }; }
+      if (s.busy()) { s.enqueue(msg.text, msg.attachments || []); return { ok: true, queued: true }; }
       const [tab] = await chrome.tabs.query({ active: true, windowId });
       s.run(msg.text, { attachments: msg.attachments || [], startTabId: tab?.id }).catch((e) => port.postMessage({ type: 'error', message: e.message }));
       return { ok: true };
     }
     case 'stop': s.stop(); return { ok: true };
+    case 'pause': return { ok: await s.pause() };
+    case 'take_over': return { ok: await s.pause({ takeOver: true }) };
+    case 'resume': return { ok: s.resume() };
     case 'permission_response':
     case 'plan_response':
       s.answer(msg.id, msg.answer); return { ok: true };
     case 'new_chat': {
-      if (s.status === 'running' || s.status === 'waiting') s.stop();
+      if (s.busy()) s.stop();
       const n = new AgentSession({ kind: 'panel', windowId });
       wireSession(n);
       sessions.set(n.id, n);
@@ -220,7 +226,15 @@ async function handlePanel(msg, s, port) {
       await inferaConversations('delete', msg.id).catch(() => {});
       return panelState(s);
     }
-    case 'set_model': s.modelOverride = msg.model; await updateSettings({ model: msg.model }); return { ok: true };
+    case 'set_model': s.modelOverride = msg.model; s.route = null; await updateSettings({ model: msg.model, operatingMode: 'manual' }); return { ok: true };
+    case 'set_operating_mode': {
+      if (!MODE_IDS.includes(msg.mode)) throw new Error('Unknown mode');
+      // Applies to this conversation if it has not started yet, and to every new one.
+      if (!s.messages.some((m) => m.role === 'assistant')) { s.modelOverride = null; s.route = null; }
+      await updateSettings({ operatingMode: msg.mode });
+      return { ok: true };
+    }
+    case 'route_preview': return routeTask(msg.mode || (await getSettings()).operatingMode, msg.text || '', { attachments: msg.attachments || 0 });
     case 'set_mode': s.modeOverride = msg.mode; await updateSettings({ permissionMode: msg.mode }); return { ok: true };
     case 'save_shortcut': return saveShortcut(msg.shortcut);
     case 'delete_shortcut': await deleteShortcut(msg.id); return listShortcuts();
@@ -239,9 +253,9 @@ async function handlePanel(msg, s, port) {
     case 'start_recording': {
       const [tab] = await chrome.tabs.query({ active: true, windowId });
       if (!tab) throw new Error('No active tab');
-      return startRecording(tab.id);
+      return startRecording(tab.id, { shots: msg.shots !== false });
     }
-    case 'stop_recording': return stopRecording({ transcript: msg.transcript || '' });
+    case 'stop_recording': return stopRecording({ transcript: msg.transcript || '', params: msg.params !== false });
     case 'recording_state': return recordingState();
     case 'open_settings': chrome.runtime.openOptionsPage(); return { ok: true };
     case 'infera_sign_in': await inferaSignIn(); return panelState(s);
@@ -256,7 +270,9 @@ async function handlePanel(msg, s, port) {
       const offset = Math.max(0, Number(msg.offset) || 0);
       const PAGE = 50;
       const matches = (c) => !q || String(c.title || '').toLowerCase().includes(q) || JSON.stringify(c.messages || []).toLowerCase().includes(q);
-      const local = offset ? [] : (await getLocal(STORAGE_KEYS.CONVERSATIONS, [])).filter(matches).map(({ id, title, updatedAt, status, kind, cost, currency }) => ({ id, title, updatedAt, status, kind, cost, currency }));
+      const local = offset ? [] : (await getLocal(STORAGE_KEYS.CONVERSATIONS, [])).filter(matches).map(({ id, title, updatedAt, status, kind, cost, currency, site, thumb, steps }) => ({ id, title, updatedAt, status, kind, cost, currency, site, thumb, steps: steps?.length || 0, stepsDone: (steps || []).filter((x) => x.status === 'done').length }));
+      // Conversations still running in this browser show their live status.
+      for (const c of local) { const live = sessions.get(c.id); if (live?.busy()) c.status = live.status; }
       const remote = (await getSettings()).syncHistory === false ? [] : await inferaConversations('list', null, { q, limit: PAGE, offset }).catch(() => []);
       const byId = new Map(local.map((c) => [c.id, c]));
       for (const r of remote || []) if (!byId.has(r.id)) byId.set(r.id, { ...r, kind: 'panel', remote: true });
@@ -329,7 +345,7 @@ async function handleMessage(msg, sender) {
 
 // ---------------- keyboard command ----------------
 chrome.commands.onCommand.addListener((cmd) => {
-  if (cmd === 'stop-agent') for (const s of sessions.values()) if (s.status === 'running' || s.status === 'waiting') s.stop();
+  if (cmd === 'stop-agent') for (const s of sessions.values()) if (s.busy()) s.stop();
 });
 
 // ---------------- debugger banner cancelled by the user ----------------
@@ -337,7 +353,7 @@ cdp.onDetach(async (tabId, reason) => {
   if (reason !== 'canceled_by_user') return;
   const sid = await tabGroups.sessionForTab(tabId);
   const s = sid && sessions.get(sid);
-  if (s && (s.status === 'running' || s.status === 'waiting')) s.stop();
+  if (s && s.busy()) s.stop();
 });
 
 // ---------------- navigation guard: blocked categories ----------------

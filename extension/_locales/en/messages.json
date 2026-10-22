@@ -1,7 +1,17 @@
 {
-  "extName": { "message": "Infera Agent" },
-  "extDescription": { "message": "A browsing agent in your browser: reads pages, clicks, types, fills forms and automates any website in plain language." },
-  "actionTitle": { "message": "Open Infera Agent" },
-  "cmdOpen": { "message": "Open the Infera Agent side panel" },
-  "cmdStop": { "message": "Stop the running Infera Agent task" }
+  "extName": {
+    "message": "Infera Agent Web"
+  },
+  "extDescription": {
+    "message": "Tell it what to do. Watch it get done. An AI browser agent that opens sites, fills forms and completes tasks for you, step by step."
+  },
+  "actionTitle": {
+    "message": "Open Infera Agent"
+  },
+  "cmdOpen": {
+    "message": "Open the Infera Agent side panel"
+  },
+  "cmdStop": {
+    "message": "Stop the running Infera Agent task"
+  }
 }

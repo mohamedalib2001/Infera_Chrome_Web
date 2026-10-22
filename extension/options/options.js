@@ -1,6 +1,7 @@
 // Infera Agent — settings page.
 import { setLanguage, currentLang, MODE_LABEL, t } from '../lib/i18n.js';
 import { COMPANY, companyLine, icoLine } from '../lib/company.js';
+import { icon } from '../lib/icons.js';
 
 const $ = (s) => document.querySelector(s);
 const send = (type, extra = {}) => chrome.runtime.sendMessage({ type, ...extra }).then((r) => { if (r?.error) throw new Error(r.error); return r?.data; });
@@ -17,8 +18,9 @@ const el = (tag, attrs = {}, ...kids) => {
 
 const L = {
   en: {
-    about: 'About and legal', aboutHint: 'Infera Agent for Chrome is published and operated by:', privacyPolicy: 'Privacy policy', terms: 'Terms of use', supportMail: 'Support', privacyMail: 'Privacy and data requests', ico: 'You can also complain to the UK Information Commissioner\'s Office (ico.org.uk).',
+    about: 'About and legal', aboutHint: 'Infera Agent Web is published and operated by:', privacyPolicy: 'Privacy policy', terms: 'Terms of use', supportMail: 'Support', privacyMail: 'Privacy and data requests', ico: 'You can also complain to the UK Information Commissioner\'s Office (ico.org.uk).',
     remoteTasks: 'Run tasks I send from my Infera Agent account (app or phone) in this browser', teamRules: 'Your team ({orgs}) applies its rules here: {n} blocked sites.', teamCap: 'Daily limit: {cap}.', teamOff: 'The team has turned the browser agent off.', fromApp: 'from the app',
+    modelsTitle: 'Models & performance', modelsHint: 'Choose how much power the agent uses. An operating mode picks the model and thinking effort for each new task; or choose one model for every task.', chooseModel: 'Or choose a model',
     subtitle: 'Settings, permissions and connections', account: 'Infera Agent account', accountHint: 'Sign in with your INFERA Agent account on inferaagent.com. Model requests go through INFERA Agent and are paid from your credits, so no API key is stored in the browser. An INFERA Agent account is required to use the extension.',
     signIn: 'Sign in', signOut: 'Sign out', signedIn: 'Signed in', notSignedIn: 'Not signed in',
     behaviour: 'Agent behaviour', behaviourHint: 'Defaults for new tasks. You can also change the model and approval mode from the side panel.',
@@ -42,8 +44,9 @@ const L = {
     srvName: 'Name', srvUrl: 'URL (https://…/mcp)', srvAuth: 'Authorization header (optional)', add: 'Add server', remove: 'Remove', noServers: 'No remote MCP servers.',
   },
   ar: {
-    about: 'عن الإضافة والمعلومات القانونية', aboutHint: 'تنشر إضافة Infera Agent for Chrome وتشغّلها:', privacyPolicy: 'سياسة الخصوصية', terms: 'شروط الاستخدام', supportMail: 'الدعم', privacyMail: 'الخصوصية وطلبات البيانات', ico: 'ويحق لك أيضًا تقديم شكوى إلى مكتب مفوّض المعلومات في المملكة المتحدة (ico.org.uk).',
+    about: 'عن الإضافة والمعلومات القانونية', aboutHint: 'تنشر إضافة Infera Agent Web وتشغّلها:', privacyPolicy: 'سياسة الخصوصية', terms: 'شروط الاستخدام', supportMail: 'الدعم', privacyMail: 'الخصوصية وطلبات البيانات', ico: 'ويحق لك أيضًا تقديم شكوى إلى مكتب مفوّض المعلومات في المملكة المتحدة (ico.org.uk).',
     remoteTasks: 'نفّذ في هذا المتصفح المهام التي أرسلها من حسابي على إنفرا إيجنت (التطبيق أو الهاتف)', teamRules: 'يطبّق فريقك ({orgs}) قواعده هنا: {n} موقعًا محظورًا.', teamCap: 'الحد اليومي: {cap}.', teamOff: 'أوقف الفريق وكيل المتصفح.', fromApp: 'من التطبيق',
+    modelsTitle: 'النماذج والأداء', modelsHint: 'اختر مقدار القوة التي يستخدمها الوكيل. وضع التشغيل يختار النموذج ومستوى التفكير لكل مهمة جديدة، أو اختر نموذجًا واحدًا لكل المهام.', chooseModel: 'أو اختر نموذجًا',
     subtitle: 'الإعدادات والأذونات والاتصالات', account: 'حساب إنفرا إيجنت', accountHint: 'سجّل الدخول بحسابك على inferaagent.com. تمرّ طلبات النموذج عبر إنفرا إيجنت وتُخصم من رصيدك، فلا يُخزَّن أي مفتاح API في المتصفح. استخدام الإضافة يتطلب حسابًا على إنفرا إيجنت.',
     signIn: 'تسجيل الدخول', signOut: 'تسجيل الخروج', signedIn: 'تم تسجيل الدخول', notSignedIn: 'لم يتم تسجيل الدخول',
     behaviour: 'سلوك الوكيل', behaviourHint: 'الإعدادات الافتراضية للمهام الجديدة، ويمكن تغيير النموذج ووضع الموافقة من اللوحة الجانبية أيضًا.',
@@ -82,6 +85,7 @@ function select(opts, value) { const s = el('select', {}, ...opts.map(([v, l]) =
 async function render() {
   const s = await send('get_settings');
   setLanguage(s.language);
+  document.documentElement.dataset.theme = s.theme || 'dark';
   document.title = `${t('appName')} — ${t('settings')}`;
   $('#title').textContent = t('appName');
   $('#subtitle').textContent = tr('subtitle');
@@ -91,7 +95,7 @@ async function render() {
 
   if (location.hash === '#mic') {
     const note = el('p', { class: 'muted' });
-    app.append(el('section', { class: 'card' }, el('h2', {}, tr('mic')),
+    app.append(el('section', { class: 'card', id: 'mic' }, el('h2', {}, tr('mic')),
       el('button', { class: 'btn primary', onclick: async () => {
         try { const st = await navigator.mediaDevices.getUserMedia({ audio: true }); st.getTracks().forEach((x) => x.stop()); note.textContent = tr('micOk'); } catch (e) { note.textContent = e.message; }
       } }, tr('micBtn')), note));
@@ -116,11 +120,29 @@ async function render() {
       } }, t('signIn')), errA));
 
   const team = await send('org_policy').catch(() => null);
-  app.append(el('section', { class: 'card' },
+  app.append(el('section', { class: 'card', id: 'account' },
     el('h2', {}, tr('account')), el('p', { class: 'muted' }, tr('accountHint')),
     inferaBlock,
     team?.orgs?.length ? el('p', { class: 'muted', id: 'teamPolicy' }, tr('teamRules').replace('{orgs}', team.orgs.join(', ')).replace('{n}', team.blocklist?.length || 0)
       + (team.memberDailyCap ? ` ${tr('teamCap').replace('{cap}', team.memberDailyCap)}` : '') + (team.blocked ? ` ${tr('teamOff')}` : '')) : null));
+
+  // Models & performance: an operating mode picks the model for each task; or choose one model.
+  const MODE_IC = { auto: 'brain', fast: 'bolt', balanced: 'gem', power: 'star' };
+  const opNow = ['auto', 'fast', 'balanced', 'power'].includes(s.operatingMode) ? s.operatingMode : 'manual';
+  const savedM = el('span', { class: 'saved' });
+  const setOp = async (patch) => { await send('update_settings', { patch }); savedM.textContent = tr('saved'); render(); };
+  const themeSel = select([['dark', t('theme_dark')], ['light', t('theme_light')], ['auto', t('theme_auto')]], s.theme || 'dark');
+  themeSel.addEventListener('change', () => setOp({ theme: themeSel.value }));
+  app.append(el('section', { class: 'card', id: 'models' },
+    el('h2', {}, tr('modelsTitle')), el('p', { class: 'muted' }, tr('modelsHint')),
+    el('b', { class: 'sub-h' }, t('opModes')),
+    el('div', { class: 'op-grid' }, ...['auto', 'fast', 'balanced', 'power'].map((m) => el('button', { class: `op-card${opNow === m ? ' on' : ''}`, 'data-op': m, onclick: () => setOp({ operatingMode: m }) },
+      icon(MODE_IC[m], { size: 22 }), el('b', {}, t(`op_${m}`)), el('span', {}, t(`op_${m}_d`))))),
+    el('b', { class: 'sub-h' }, tr('chooseModel')),
+    el('div', { class: 'model-list' }, ...MODELS.map(([id, label]) => el('button', { class: `model-row${opNow === 'manual' && s.model === id ? ' on' : ''}`, 'data-model': id, onclick: () => setOp({ model: id, operatingMode: 'manual' }) },
+      icon(/opus|fable/.test(id) ? 'star' : /haiku/.test(id) ? 'bolt' : 'gem', { size: 16 }), el('span', { class: 'grow' }, label), el('i', { class: 'radio' })))),
+    el('div', { class: 'fields', style: 'margin-top:14px' }, field(t('theme'), themeSel)),
+    savedM));
 
   // Behaviour
   const model = select(MODELS, s.model);
@@ -137,12 +159,12 @@ async function render() {
   const sync = el('input', { type: 'checkbox', checked: s.syncHistory !== false ? true : undefined });
   const remote = el('input', { type: 'checkbox', checked: s.remoteTasks !== false ? true : undefined });
   const savedB = el('span', { class: 'saved' });
-  app.append(el('section', { class: 'card' },
+  app.append(el('section', { class: 'card', id: 'behaviour' },
     el('h2', {}, tr('behaviour')), el('p', { class: 'muted' }, tr('behaviourHint')),
     el('div', { class: 'fields' }, field(tr('model'), model), field(tr('effort'), effort), field(tr('mode'), mode), field(tr('language'), lang)),
     el('div', { style: 'display:grid;gap:8px;margin-top:12px' }, check(tr('safety'), safety), check(tr('notif'), notif), check(tr('sound'), sound), check(tr('web'), web), check(tr('memoryOn'), mem), check(tr('allTabs'), tabsAll), check(tr('sync'), sync), check(tr('remoteTasks'), remote)),
     el('div', { class: 'actions' }, el('button', { class: 'btn primary', onclick: async () => {
-      await send('update_settings', { patch: { model: model.value, effort: effort.value, permissionMode: mode.value, language: lang.value, safetyChecker: safety.checked, notifications: notif.checked, sound: sound.checked, webResearch: web.checked, memory: mem.checked, allTabsAccess: tabsAll.checked, syncHistory: sync.checked, remoteTasks: remote.checked } });
+      await send('update_settings', { patch: { ...(model.value !== s.model ? { model: model.value, operatingMode: 'manual' } : {}), effort: effort.value, permissionMode: mode.value, language: lang.value, safetyChecker: safety.checked, notifications: notif.checked, sound: sound.checked, webResearch: web.checked, memory: mem.checked, allTabsAccess: tabsAll.checked, syncHistory: sync.checked, remoteTasks: remote.checked } });
       savedB.textContent = tr('saved');
       if (lang.value !== s.language) render();
     } }, tr('save')), savedB)));
@@ -158,7 +180,7 @@ async function render() {
     const q = memFilter.value.trim().toLowerCase();
     memBody.replaceChildren(...memories.filter((m) => !q || `${m.text} ${m.topic || ''}`.toLowerCase().includes(q)).slice(0, 200).map(memRow));
   } });
-  app.append(el('section', { class: 'card' },
+  app.append(el('section', { class: 'card', id: 'memory' },
     el('h2', {}, tr('memory')), el('p', { class: 'muted' }, tr('memoryHint')),
     memories.length ? el('p', { class: 'muted' }, tr('memoryCount').replace('{n}', memories.length).replace('{max}', 2000)) : null,
     memories.length > 5 ? memFilter : null,
@@ -174,7 +196,7 @@ async function render() {
     el('td', {}, new Date(p.createdAt).toLocaleString(currentLang())),
     el('td', {}, el('span', { class: `pill ${p.valid ? 'ok' : 'bad'}` }, p.valid ? tr('valid') : tr('tampered'))),
     el('td', {}, el('button', { class: 'btn small danger', onclick: async () => { await send('revoke_permission', { id: p.id }); render(); } }, tr('revoke'))))));
-  app.append(el('section', { class: 'card' },
+  app.append(el('section', { class: 'card', id: 'sites' },
     el('h2', {}, tr('sites')), el('p', { class: 'muted' }, tr('sitesHint')),
     perms.length ? el('table', {}, el('thead', {}, el('tr', {}, el('th', {}, tr('site')), el('th', {}, tr('since')), el('th', {}, tr('status')), el('th', {}))), tbody) : el('p', { class: 'muted' }, tr('none')),
     perms.length ? el('div', { class: 'actions' }, el('button', { class: 'btn danger', onclick: async () => { await send('revoke_all_permissions'); render(); } }, tr('revokeAll'))) : null));
@@ -182,7 +204,7 @@ async function render() {
   // Blocklist
   const bl = el('textarea', { rows: 4, placeholder: 'example.com' }, (s.userBlocklist || []).join('\n'));
   const savedC = el('span', { class: 'saved' });
-  app.append(el('section', { class: 'card' },
+  app.append(el('section', { class: 'card', id: 'blocklist' },
     el('h2', {}, tr('blocklist')), el('p', { class: 'muted' }, tr('blocklistHint')), bl,
     el('div', { class: 'actions' }, el('button', { class: 'btn primary', onclick: async () => {
       await send('update_settings', { patch: { userBlocklist: bl.value.split(/\s+/).map((x) => x.trim().toLowerCase()).filter(Boolean) } });
@@ -196,7 +218,7 @@ async function render() {
   const relayOn = el('input', { type: 'checkbox', checked: s.relayEnabled ? true : undefined });
   const classifier = el('input', { value: s.remoteDomainClassifier, placeholder: 'https://api.infera.ai/domain_info?domain={domain}' });
   const savedD = el('span', { class: 'saved' });
-  app.append(el('section', { class: 'card' },
+  app.append(el('section', { class: 'card', id: 'connections' },
     el('h2', {}, tr('connections')),
     el('div', { class: 'row', style: 'justify-content:space-between;flex-wrap:wrap' },
       el('div', {}, el('div', {}, tr('native')), el('span', { class: `pill ${ns.state === 'connected' ? 'ok' : 'bad'}` }, `${ns.state}${ns.host ? ' — ' + ns.host : ''}`),
@@ -217,7 +239,7 @@ async function render() {
   const sName = el('input', { placeholder: 'crm' });
   const sUrl = el('input', { placeholder: 'https://mcp.example.com/mcp' });
   const sAuth = el('input', { type: 'password', placeholder: 'Bearer …', autocomplete: 'off' });
-  app.append(el('section', { class: 'card' },
+  app.append(el('section', { class: 'card', id: 'mcp' },
     el('h2', {}, tr('remote')), el('p', { class: 'muted' }, tr('remoteHint')),
     servers.length ? el('table', {}, el('tbody', {}, ...servers.map((sv) => el('tr', {},
       el('td', {}, sv.name), el('td', { style: 'direction:ltr' }, sv.url),
@@ -244,6 +266,12 @@ async function render() {
     el('p', { class: 'muted' }, `${tr('supportMail')}: `, mail(COMPANY.emails.support), ' · ', `${tr('privacyMail')}: `, mail(COMPANY.emails.privacy)),
     el('p', { class: 'muted', style: 'font-size:12px' }, tr('ico')),
     el('p', { class: 'muted', style: 'font-size:12px;margin:10px 0 0' }, `Extension ID: ${chrome.runtime.id} · v${chrome.runtime.getManifest().version}`)));
+
+  // Section navigation (built from the sections on the page, so it always matches them).
+  const NAV_IC = { mic: 'mic', account: 'user', models: 'brain', behaviour: 'settings', memory: 'memory', sites: 'shield', blocklist: 'x', connections: 'plug', mcp: 'layers', policy: 'shield', about: 'info' };
+  const nav = $('#nav');
+  nav.replaceChildren(...[...app.querySelectorAll('section.card[id]')].map((sec) => el('a', { href: `#${sec.id}`, class: 'nav-link', onclick: (e) => { e.preventDefault(); sec.scrollIntoView({ behavior: 'smooth', block: 'start' }); nav.querySelectorAll('a').forEach((a) => a.classList.toggle('on', a === e.currentTarget)); } },
+    icon(NAV_IC[sec.id] || 'info', { size: 16 }), el('span', {}, sec.querySelector('h2')?.textContent || sec.id))));
 }
 
 render();

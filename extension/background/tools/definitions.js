@@ -343,6 +343,20 @@ export const MEMORY_TOOLS = [
 // word when the conversation is summarized (handled in the agent loop).
 export const TASK_TOOLS = [
   {
+    name: 'task_steps',
+    description: 'The step list the user watches live while you work. For a task of three or more steps, first call it with action "plan" and short step titles in the user\'s language (e.g. "Open the site", "Sign in", "Fill in the application", "Upload the documents", "Review and submit"). Then mark each step "start" when you begin it and "done" when you have VERIFIED it on the page, with a short note of the evidence (e.g. "Confirmation no. 4471 shown"). Use "fail" with the reason, or "skip". If the plan changes, call "plan" again: steps already done keep their status. Not needed for one-step questions.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['plan', 'start', 'done', 'fail', 'skip'] },
+        steps: { type: 'array', items: { type: 'string' }, description: 'For "plan": the steps, in order, as short titles.' },
+        step: { type: 'integer', description: 'For start/done/fail/skip: the step number, from 1.' },
+        note: { type: 'string', description: 'Evidence that the step is done, or why it failed (short).' },
+      },
+      required: ['action'],
+    },
+  },
+  {
     name: 'task_notes',
     description: 'Your notebook for this task. On a long task (many pages, many steps, data collected along the way) write down the plan, what is done, and every finding a later step needs: names, numbers, prices, URLs, IDs. Long conversations are summarized automatically; the notebook is kept word for word and handed back after each summary. action "append" adds lines, "replace" rewrites it (keep it tidy and under 30,000 characters), "read" returns it.',
     input_schema: {

@@ -21,6 +21,8 @@ export async function saveShortcut(s) {
     prompt: s.prompt,
     params: s.params || [],        // [{name, description, default}] -> {{name}} placeholders
     isWorkflow: !!s.isWorkflow,
+    // The workflow studio's step list ({kind: do|if|each|wait|check, text}); the prompt is compiled from it.
+    steps: Array.isArray(s.steps) ? s.steps.filter((x) => String(x?.text || '').trim()).slice(0, 100).map((x) => ({ kind: ['do', 'if', 'each', 'wait', 'check'].includes(x.kind) ? x.kind : 'do', text: String(x.text).slice(0, 2000) })) : undefined,
     startUrl: s.startUrl || '',
     model: s.model || '',
     createdAt: s.createdAt || Date.now(),

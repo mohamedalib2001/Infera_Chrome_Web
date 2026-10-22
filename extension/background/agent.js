@@ -29,6 +29,7 @@ import { COMPACT_THRESHOLD_BYTES, STORAGE_KEYS, PERMISSION_MODES, PERMISSION_TYP
 import { playSound } from './offscreen-client.js';
 import { popupApproval } from './approvals.js';
 import { remoteTools, callRemoteTool } from './remote-mcp.js';
+import { routeTask, recordOutcome, MODE_IDS, FAILOVER } from './router.js';
 
 // A safety net only: long tasks are bounded by the per-task spending limit the
 // user approves, and their history is compacted on the server as it grows.
@@ -40,6 +41,26 @@ const MAX_HELPERS = 4;
 // Larger conversations are kept in the account from their latest summary on.
 const ACCOUNT_COPY_MAX = 4 * 1024 * 1024;
 const HISTORY_LIMIT = 50;
+// Our own tools that act on a page (not just read it): not run after the user took over mid-batch.
+const BROWSER_ACTION_TOOLS = new Set(['computer', 'navigate', 'form_input', 'javascript_tool', 'browser_batch', 'file_upload', 'upload_image']);
+const THUMB_W = 240;
+
+// A small JPEG of the latest screenshot for the history list (kept in this browser only).
+async function makeThumb(source) {
+  try {
+    const bytes = Uint8Array.from(atob(source.data), (c) => c.charCodeAt(0));
+    const bmp = await createImageBitmap(new Blob([bytes], { type: source.media_type || 'image/jpeg' }));
+    const h = Math.max(1, Math.round((bmp.height / bmp.width) * THUMB_W));
+    const c = new OffscreenCanvas(THUMB_W, Math.min(h, 180));
+    c.getContext('2d').drawImage(bmp, 0, 0, THUMB_W, h);
+    bmp.close?.();
+    const blob = await c.convertToBlob({ type: 'image/jpeg', quality: 0.6 });
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+    return `data:image/jpeg;base64,${btoa(bin)}`;
+  } catch { return ''; }
+}
 
 export class AgentSession {
   constructor({ id = uuid(), kind = 'panel', windowId = null, title = '' } = {}) {
@@ -68,7 +89,18 @@ export class AgentSession {
     this.depth = 0;              // 1 for a helper started by delegate_tasks
     this.ephemeral = false;      // helpers are not saved as conversations of their own
     this.children = new Set();   // helpers running now
+    this.steps = [];             // the live step list (task_steps): [{ title, status, note }]
+    this.paused = false;         // paused (or taken over) by the user: the next step waits
+    this.takenOver = false;      // the user is working in the browser themself
+    this.resumeWaiters = [];
+    this.resumeNote = '';        // told to the model at the next step after a pause
+    this.runStartedAt = 0;
+    this.site = '';              // the page the agent is on now (host)
+    this.lastShot = null;        // the latest screenshot (base64 JPEG/PNG), for the history thumbnail
+    this.thumb = '';
   }
+
+  busy() { return this.status === 'running' || this.status === 'waiting' || this.status === 'paused'; }
 
   // ---------- UI plumbing ----------
   subscribe(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
@@ -76,7 +108,8 @@ export class AgentSession {
   hasUi() { return this.listeners.size > 0; }
 
   summary() {
-    return { id: this.id, kind: this.kind, title: this.title, status: this.status, createdAt: this.createdAt, usage: this.usage, tokensSaved: this.tokensSaved, cost: this.cost, currency: this.currency };
+    return { id: this.id, kind: this.kind, title: this.title, status: this.status, createdAt: this.createdAt, usage: this.usage, tokensSaved: this.tokensSaved, cost: this.cost, currency: this.currency,
+      steps: this.steps, runStartedAt: this.runStartedAt, site: this.site, takenOver: this.takenOver, runCost: this.runCost || 0, model: this.lastModel || '', lastStatus: this.lastStatus || '' };
   }
 
   setStatus(s) {
@@ -90,7 +123,7 @@ export class AgentSession {
     const id = uuid();
     this.setStatus('waiting');
     return new Promise((resolve) => {
-      const done = (answer) => { this.pending.delete(id); this.setStatus('running'); resolve(answer); };
+      const done = (answer) => { this.pending.delete(id); this.setStatus(this.paused ? 'paused' : 'running'); resolve(answer); };
       this.pending.set(id, done);
       const payload = {
         id, permissionType: req.type, netloc: req.netloc, url: req.url, description: req.description,
@@ -105,7 +138,7 @@ export class AgentSession {
     const id = uuid();
     this.setStatus('waiting');
     return new Promise((resolve) => {
-      this.pending.set(id, (answer) => { this.pending.delete(id); this.setStatus('running'); resolve(answer === 'approve' || answer === 'once' || answer === 'always'); });
+      this.pending.set(id, (answer) => { this.pending.delete(id); this.setStatus(this.paused ? 'paused' : 'running'); resolve(answer === 'approve' || answer === 'once' || answer === 'always'); });
       this.emit({ type: 'plan_request', request: { id, ...plan } });
       if (!this.hasUi()) notifyApproval(this, id, { description: `Plan: ${plan.approach.join(' → ')}\nSites: ${plan.domains.join(', ')}`, allowAlways: false, isPlan: true });
     });
@@ -140,22 +173,129 @@ export class AgentSession {
     for (const c of this.children) c.stop();
     this.abort?.abort();
     for (const fn of [...this.pending.values()]) fn('deny');
+    this.#release();
+  }
+
+  // ---------- pause, take over, resume ----------
+  // Pausing lets the current step finish and holds the next one. Taking over also
+  // releases the browser (the debugger and the overlay) so the user can work in the
+  // page themself; when they give control back, the agent looks at the page again
+  // before it acts, and keeps every step it already completed.
+  async pause({ takeOver = false } = {}) {
+    if (!this.busy()) return false;
+    this.paused = true;
+    this.takenOver = this.takenOver || takeOver;
+    for (const c of this.children) c.pause({ takeOver });
+    this.setStatus('paused');
+    this.emit({ type: 'paused', takenOver: this.takenOver });
+    if (takeOver) {
+      for (const t of await tabGroups.tabs(this.id).catch(() => [])) { overlay.hide(t.tabId); await cdp.detach(t.tabId); }
+    }
+    return true;
+  }
+
+  resume() {
+    if (!this.paused) return false;
+    this.resumeNote = this.takenOver
+      ? 'The user took over the browser for a while and has now given control back to you. The pages may have changed: look at the current state of the tab (screenshot or read_page) before your next action, keep what is already done, and continue the task.'
+      : 'The user paused the task and has now resumed it. Continue from where you stopped.';
+    const takenOver = this.takenOver;
+    this.paused = false;
+    this.takenOver = false;
+    for (const c of this.children) c.resume();
+    this.setStatus(this.pending.size ? 'waiting' : 'running');
+    this.emit({ type: 'resumed', takenOver });
+    this.#release();
+    return true;
+  }
+
+  #release() { for (const fn of this.resumeWaiters.splice(0)) fn(); }
+
+  // Held here while paused; true when the user took over (the page may have changed).
+  async #gate() {
+    if (!this.paused) return false;
+    const takenOver = this.takenOver;
+    await new Promise((r) => this.resumeWaiters.push(r));
+    if (this.abort?.signal.aborted) throw new DOMException('aborted', 'AbortError');
+    const tabs = await tabGroups.tabs(this.id).catch(() => []);
+    for (const t of tabs) if (!isRestrictedUrl(t.url)) overlay.show(t.tabId);
+    return takenOver;
+  }
+
+  #takeResumeNote() {
+    const n = this.resumeNote;
+    this.resumeNote = '';
+    return n ? { type: 'text', text: `<system-reminder>${n}</system-reminder>` } : null;
+  }
+
+  // ---------- live steps (task_steps) ----------
+  // The plan the user watches in the execution view. Replanning keeps the steps that
+  // are already done (matched by title), so verified work is never shown as undone.
+  #taskSteps(input = {}) {
+    const act = input.action;
+    const clean = (x) => String(x ?? '').trim().slice(0, 160);
+    if (act === 'plan') {
+      const titles = (Array.isArray(input.steps) ? input.steps : []).map(clean).filter(Boolean).slice(0, 40);
+      if (!titles.length) return { content: [{ type: 'text', text: 'Give the steps as a list of short titles.' }], isError: true };
+      const old = new Map(this.steps.map((x) => [x.title, x]));
+      this.steps = titles.map((title) => (old.get(title)?.status === 'done' ? old.get(title) : { title, status: 'pending', note: '' }));
+    } else if (['start', 'done', 'fail', 'skip'].includes(act)) {
+      const i = Number(input.step) - 1;
+      const st = this.steps[i];
+      if (!st) return { content: [{ type: 'text', text: `There is no step ${input.step}; the plan has ${this.steps.length} steps.` }], isError: true };
+      if (act === 'start') for (const x of this.steps) if (x.status === 'active') x.status = 'pending';
+      st.status = { start: 'active', done: 'done', fail: 'failed', skip: 'skipped' }[act];
+      if (input.note !== undefined) st.note = clean(input.note);
+    } else {
+      return { content: [{ type: 'text', text: 'action must be plan, start, done, fail or skip.' }], isError: true };
+    }
+    this.emit({ type: 'steps', steps: this.steps });
+    const mark = { pending: '○', active: '▶', done: '✓', failed: '✕', skipped: '–' };
+    return { content: [{ type: 'text', text: this.steps.map((x, i) => `${i + 1}. ${mark[x.status]} ${x.title}${x.note ? ` — ${x.note}` : ''}`).join('\n') }] };
+  }
+
+  // Where the agent is now, for the execution view.
+  async #where() {
+    const tabs = await tabGroups.tabs(this.id).catch(() => []);
+    const t = tabs.find((x) => x.active) || tabs[0];
+    if (!t) return tabs;
+    let host = '';
+    try { host = new URL(t.url).hostname.replace(/^www\./, ''); } catch { /* keep */ }
+    if (host !== this.site || t.url !== this.siteUrl) {
+      this.site = host;
+      this.siteUrl = t.url;
+      this.emit({ type: 'where', site: host, url: t.url, title: t.title || '', tabId: t.tabId });
+    }
+    return tabs;
   }
 
   // ---------- main entry ----------
   async run(userText, { attachments = [], startTabId = null } = {}) {
-    if (this.status === 'running' || this.status === 'waiting') throw new Error('A task is already running in this conversation.');
-    const settings = await getSettings();
+    if (this.busy()) throw new Error('A task is already running in this conversation.');
+    let settings = await getSettings();
     const policy = await chrome.storage.managed.get(null).catch(() => ({}));
     if (policy.enabled === false) throw new Error('Infera Agent is disabled by your organization.');
+    const fresh = !this.messages.some((m) => m.role === 'assistant');
     this.abort = new AbortController();
     this.task = this.task ? `${this.task}\n\nFollow-up: ${userText}` : userText;
     if (!this.title) this.title = (userText || attachments.map((a) => a.name).filter(Boolean).join(', ')).slice(0, 80);
-    const model = this.modelOverride || settings.model;
+    let model = this.modelOverride || settings.model;
+    // An operating mode (Auto / Fast / Balanced / Power) picks the model and effort when the
+    // conversation starts; a conversation then stays on that model.
+    const op = settings.operatingMode;
+    if (!this.modelOverride && MODE_IDS.includes(op)) {
+      if (fresh || !this.route) this.route = await routeTask(op, userText, { attachments: attachments.length, followUp: !fresh });
+      model = fresh ? this.route.model : (this.lastModel || this.route.model);
+      settings = { ...settings, effort: this.route.effort };
+      this.emit({ type: 'routed', ...this.route, model });
+    }
     this.lastModel = model;
     const mode = this.modeOverride || settings.permissionMode;
     this.runCost = 0;
     this.budgetLimit = Number(settings.taskBudget) || 0;
+    this.runStartedAt = Date.now();
+    this.paused = false;
+    this.takenOver = false;
     this.setStatus('running');
     const keepAlive = setInterval(() => chrome.runtime.getPlatformInfo(), 20_000);
 
@@ -188,7 +328,7 @@ export class AgentSession {
         this.messages.push({ role: 'user', content });
         await this.#loop({ model, mode, settings, toolset, policy });
       }
-      if (this.status === 'running') this.setStatus('done');
+      if (this.status === 'running' || this.status === 'paused') { this.paused = false; this.takenOver = false; this.setStatus('done'); }
     } catch (e) {
       if (this.abort.signal.aborted) {
         this.#closeDanglingToolUses('The user stopped the task.');
@@ -215,6 +355,7 @@ export class AgentSession {
         setTimeout(() => this.run(late.map((q) => q.text).filter(Boolean).join('\n\n'), { attachments: late.flatMap((q) => q.attachments) }).catch(() => {}), 0);
       }
       if (this.status === 'done' || this.status === 'error') await this.#notifyDone(settings);
+      if (this.route && (this.status === 'done' || this.status === 'error') && !this.ephemeral) await recordOutcome(this.route.mode, this.status === 'done').catch(() => {});
     }
   }
 
@@ -417,6 +558,11 @@ export class AgentSession {
     let paused = false;
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       if (this.abort.signal.aborted) throw new DOMException('aborted', 'AbortError');
+      await this.#gate();
+      const resumed = this.#takeResumeNote();
+      const tail = this.messages[this.messages.length - 1];
+      if (resumed && tail?.role === 'user' && Array.isArray(tail.content)) tail.content.push(resumed);
+      if (this.queue.length && tail?.role === 'user' && Array.isArray(tail.content)) tail.content.push(...this.#drainQueue());
       await this.#checkBudget(settings);
       this.#compact();
       this.emit({ type: 'assistant_start' });
@@ -432,6 +578,18 @@ export class AgentSession {
           this.noWebTools = true;
           tools = toolList(toolset);
           await this.#ensureSystem({ mode, tabs: await tabGroups.tabs(this.id), toolset, web: false, memory: settings.memory !== false, advisor: !!modelInfo(model).advisor, helpers: this.depth === 0 });
+          turn--;
+          continue;
+        }
+        // The model is overloaded or unavailable before this conversation's first answer:
+        // continue on a model of the same kind (nothing model-bound exists yet).
+        const next = FAILOVER[model];
+        if ((e.status === 429 || e.status === 529 || e.status >= 500) && next && !this.messages.some((m) => m.role === 'assistant')
+            && (!toolset || modelInfo(next).browser)) {
+          this.emit({ type: 'info', message: `${modelInfo(model).label?.split(' —')[0] || model} is busy right now — continuing with ${modelInfo(next).label?.split(' —')[0] || next}.` });
+          model = next;
+          this.lastModel = next;
+          await this.#ensureSystem({ mode, tabs: await tabGroups.tabs(this.id), toolset, web: useWeb(), memory: settings.memory !== false, advisor: !!modelInfo(next).advisor, helpers: this.depth === 0 });
           turn--;
           continue;
         }
@@ -484,9 +642,15 @@ export class AgentSession {
 
       const results = [];
       let browserFailed = false; // browser actions run in order and stop at the first failure
+      let handedBack = false;    // the user took over mid-batch: the rest was planned for a page that may have changed
       for (const u of uses) {
         if (this.abort.signal.aborted) {
           results.push(errorResult(u, 'The user stopped the task.'));
+          continue;
+        }
+        if (await this.#gate()) handedBack = true;
+        if (handedBack && (isToolsetUse(u) || BROWSER_ACTION_TOOLS.has(u.name))) {
+          results.push(errorResult(u, 'Not run: the user took over the browser before this step. Look at the page again before acting.'));
           continue;
         }
         if (isToolsetUse(u) && browserFailed) {
@@ -506,6 +670,8 @@ export class AgentSession {
           r = await this.#runRemote(remoteByName.get(u.name), u, mode, settings);
         } else if (u.name === 'task_notes') {
           r = this.#taskNotes(u.input);
+        } else if (u.name === 'task_steps') {
+          r = this.#taskSteps(u.input);
         } else if (u.name === 'delegate_tasks' && this.depth === 0) {
           r = await this.#delegate(u.input, model, mode);
         } else if (!TOOL_BY_NAME[u.name]) {
@@ -514,11 +680,15 @@ export class AgentSession {
           r = await executeTool(u.name, u.input, this.#toolCtx(mode, settings, u.id));
         }
         this.emit({ type: 'tool_result', id: u.id, name: u.name, isError: !!r.isError, content: r.content.filter((b) => b.type !== 'browser_state').map(uiBlock) });
+        const shot = r.content.find((b) => b.type === 'image' && b.source?.data);
+        if (shot) this.lastShot = shot.source;
         results.push(isToolsetUse(u) ? toolsetResult(u, r) : { type: 'tool_result', tool_use_id: u.id, content: r.content, ...(r.isError ? { is_error: true } : {}) });
       }
       // New site know-how is appended after the results (never edits the system prompt).
-      const note = this.#contextNote(mode, await tabGroups.tabs(this.id).catch(() => []));
+      const note = this.#contextNote(mode, await this.#where());
       if (note) results.push({ type: 'text', text: note });
+      const back = this.#takeResumeNote();
+      if (back) results.push(back);
       if (this.queue.length) results.push(...this.#drainQueue());
       // After a summary, the notebook is handed back word for word.
       if (this.notesPending) results.push(this.#notesBlock());
@@ -699,8 +869,9 @@ export class AgentSession {
       role: m.role,
       content: Array.isArray(m.content) ? m.content.map(stripForHistory) : m.content,
     }));
-    const entry = { id: this.id, title: this.title, kind: this.kind, createdAt: this.createdAt, updatedAt: Date.now(), status: this.status, messages: stripped, usage: this.usage, cost: this.cost, currency: this.currency, notes: this.notes, compactions: this.compactions };
-    const next = [entry, ...all.filter((c) => c.id !== this.id)].slice(0, HISTORY_LIMIT);
+    if (this.lastShot && this.lastShot !== this.thumbOf) { this.thumbOf = this.lastShot; this.thumb = (await makeThumb(this.lastShot)) || this.thumb; }
+    const entry = { id: this.id, title: this.title, kind: this.kind, createdAt: this.createdAt, updatedAt: Date.now(), status: this.status, messages: stripped, usage: this.usage, cost: this.cost, currency: this.currency, notes: this.notes, compactions: this.compactions, steps: this.steps, site: this.site, model: this.lastModel || '', route: this.route?.mode || '' };
+    const next = [{ ...entry, thumb: this.thumb }, ...all.filter((c) => c.id !== this.id)].slice(0, HISTORY_LIMIT);
     await setLocal(STORAGE_KEYS.CONVERSATIONS, next);
     // And in the person's INFERA Agent account, so the history follows them to every device.
     const settings = await getSettings();
@@ -722,6 +893,10 @@ export class AgentSession {
     s.status = 'idle';
     s.notes = entry.notes || '';
     s.compactions = entry.compactions || 0;
+    s.steps = Array.isArray(entry.steps) ? entry.steps : [];
+    s.site = entry.site || '';
+    s.thumb = entry.thumb || '';
+    s.lastStatus = entry.status || '';
     // A task cut off mid-step (the browser closed, the worker stopped): close its
     // open tool calls so the conversation can simply go on ("continue").
     const last = s.messages[s.messages.length - 1];

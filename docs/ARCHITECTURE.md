@@ -274,10 +274,51 @@ only `navigate` works. CAPTCHA and sign-in pages are detected and handed back to
 * Enterprise (`managed_schema.json`): `enabled`, `allowlist`, `blocklist`,
   `defaultPermissionMode`, `disableSkipAllApprovals`, `relayUrl`.
 
+## Execution center, operating modes and the workflow studio (2.1)
+
+* **Live steps** — tool `task_steps` (plan / start / done / fail / skip), run in the agent loop. The plan
+  is shown live in the side panel's execution center; marking a step done carries the evidence the
+  model saw ("Confirmation no. 4471 shown"). Replanning keeps the steps already done (matched by
+  title). The steps, the current site and a 240-px JPEG of the latest screenshot are saved with the
+  conversation; the thumbnail stays in this browser only (it is not sent to the account).
+* **Pause, take over, resume** (`agent.js` `pause()` / `resume()`, panel messages `pause`, `take_over`,
+  `resume`) — a gate before every model call and every tool holds the task. Taking over also hides the
+  overlay and detaches the debugger, so the person works in the page; browser actions the model had
+  already planned in that batch are not run, and on resume the model is told to look at the page again
+  before acting. Messages sent while paused join the task at the next step. Stop works in every state.
+* **Verification** — the system prompt requires checking the result on the page before reporting a
+  step or task as done, and checking for a previous submission before ever submitting again.
+* **Operating modes** (`router.js`) — `operatingMode` = auto | fast | balanced | power | manual. Fast is
+  Sonnet 5 at low effort, Balanced Sonnet 5 with the Opus 5.5 advisor at medium, Power Opus 5.5 at high.
+  Auto scores the request (distinct action words in English and Arabic, listed steps, length, attached
+  files; short questions score down) and picks a mode; it steps up a level when that level failed on more
+  than a third of at least five recent tasks in this browser (`routeStats`, last 20 per mode). The mode is
+  chosen once per conversation, so the model, its prompt cache and its thinking blocks stay consistent.
+  New installs start on Auto; existing installs keep their chosen model (`manual`).
+* **Failover** — before a conversation's first answer, a model that stays overloaded or unavailable after
+  the client's retries (429 / 529 / 5xx) hands the task to the next model of the same kind
+  (`FAILOVER`), and the person is told.
+* **Workflow studio** — saved workflows keep a step list (`steps: [{kind: do|if|each|wait|check, text}]`)
+  next to the compiled numbered prompt that the agent receives; `{{variables}}` become parameters with
+  defaults. Six built-in templates (Arabic and English), import / export as `infera-workflows` JSON,
+  scheduling, and recording with optional voice, screenshots and field detection.
+* **Usage dashboard** — today / week / month from the account's operations log: the total, the change
+  against the previous period, a bar per hour or day, and the split by model.
+* **Design system** — `lib/theme.css` tokens (dark by default, light and system themes), `lib/icons.js`
+  inline SVG icons; no external fonts, frameworks or network requests. `scripts/perf.mjs` measures the
+  side panel's time to interactive, JS heap, DOM size and the package against fixed budgets.
+
 ## Not included
 
 * The report's Cowork cloud container (terminal, Python, file production) is a separate cloud product;
   here, cloud sessions connect through the relay instead.
 * 1Password integration.
+* Models from other providers (OpenAI and others). The agent depends on Anthropic-specific browser
+  tooling (the trained browser toolset, computer-use actions, server-side compaction, the advisor), and
+  the account's billing gateway speaks the Anthropic Messages API. Routing inside the Claude family
+  (operating modes, failover) is implemented; another provider needs a translating gateway on the
+  platform first.
+* Running while the browser is fully closed. Scheduled and account-sent tasks run while Chrome is
+  open (also in the background); work outside the browser goes to Infera Agent Desktop.
 * rrweb DOM recording — workflow recording uses a lightweight semantic recorder plus screenshots and
   voice narration (Web Speech API), turned into a parameterised shortcut by the helper model.

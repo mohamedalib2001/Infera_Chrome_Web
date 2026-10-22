@@ -1,9 +1,9 @@
 # Privacy Policy — Infera Agent for Chrome
 # سياسة الخصوصية — إنفرا إيجنت للمتصفح
 
-_Last updated: 16 October 2026 — آخر تحديث: 16 أكتوبر 2026_
+_Last updated: 22 October 2026 — آخر تحديث: 22 أكتوبر 2026_
 
-This policy covers the browser extension **Infera Agent for Chrome**. It is part of the Infera Agent
+This policy covers the browser extension **Infera Agent Web** (formerly Infera Agent for Chrome). It is part of the Infera Agent
 service. The full service policy is published at **https://inferaagent.com/privacy**: its section 11a
 covers this extension, and the rest (account, billing, security, cookies) applies to it too. If the two
 ever differ, the published service policy prevails.
@@ -64,7 +64,10 @@ These are kept in the browser's local storage and deleted when you remove the ex
 
 * settings and approved sites (signed so they can't be tampered with);
 * shortcuts and scheduled tasks;
-* a copy of your memory and conversation history.
+* a copy of your memory and conversation history, with a small picture of the last screen of each task
+  for the task history (this picture is never sent to our servers);
+* how recent tasks ended in each operating mode (done or failed), so the Auto mode can pick the right
+  model.
 
 ## 5. How long we keep it
 

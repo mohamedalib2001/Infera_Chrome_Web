@@ -8,7 +8,11 @@ Item ID: `nablmcconmoblabfpbcfaplmbijmgdjc`
 
 ### Description (English)
 
-INFERA Agent is a browsing agent that works inside your own Chrome. Tell it what you need in plain language and it reads the page, clicks, types, scrolls, fills forms and works across tabs — using the sites you are already signed in to. You watch every step in the side panel and can stop or take over at any moment.
+**Name:** Infera Agent Web
+
+Tell it what to do. Watch it get done.
+
+Infera Agent Web is an AI browser execution agent that works inside your own Chrome. Tell it what you need in plain language and it opens the sites, signs in with your sessions, fills the forms, uploads your files and checks the result — step by step, in front of you. A live execution center shows the plan, each verified step, the current page and the cost; you can pause, take over the browser, give control back, or stop at any moment.
 
 What you can do
 • Summarize articles and long pages, compare products in a table, extract data
@@ -20,6 +24,9 @@ What you can do
 • Long tasks that keep going: older steps are summarized and a task notebook keeps every finding
 • Up to 4 helper agents working in parallel on independent parts of a task
 • Long-term memory in your account, on every device
+• Operating modes — Auto, Fast, Balanced, Power — so each task gets the right model and cost
+• A workflow studio: record, edit steps (if / for each / wait / verify), templates, import and export
+• A usage dashboard: today, this week and this month, by model
 
 Your INFERA Agent account
 Sign in with your inferaagent.com account (password, Google or SSO). No API keys: usage is paid from your INFERA Agent credits, and the model key never reaches your browser.
@@ -31,7 +38,7 @@ Safety first
 • Downloads and sign-in approvals always ask you first
 • Page content is treated as untrusted data, and hidden text is removed to resist prompt-injection
 
-Works in Arabic and English, with light and dark themes.
+Works in Arabic and English (right to left), with dark, light and system themes.
 
 Infera Agent is developed and operated by Infera Engine Ltd, registered in England and Wales (company no. 17520775), 128 City Road, London EC1V 2NX, United Kingdom.
 

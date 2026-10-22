@@ -49,6 +49,9 @@ okm('module imports resolve');
 for (const l of ['en', 'ar']) {
   const msgs = JSON.parse(readFileSync(path.join(ext, '_locales', l, 'messages.json'), 'utf8'));
   for (const k of ['extName', 'extDescription', 'actionTitle', 'cmdOpen', 'cmdStop']) if (!msgs[k]) fail(`_locales/${l} missing ${k}`);
+  // Chrome Web Store limits: the name up to 75 characters, the description up to 132.
+  if ((msgs.extName?.message || '').length > 75) fail(`_locales/${l} extName is longer than 75 characters`);
+  if ((msgs.extDescription?.message || '').length > 132) fail(`_locales/${l} extDescription is longer than 132 characters`);
 }
 okm('locales');
 
