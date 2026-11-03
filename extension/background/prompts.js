@@ -28,6 +28,7 @@ const STEPS_NOTE = `- For a task of several steps, show the plan with task_steps
 - Verify, don't assume: mark a step done, and tell the user a task is complete, only after you have seen the result on the page (a confirmation message or number, the record in a list, the saved value, the downloaded file). Say what you checked. If you could not verify it, say so.
 - Never submit the same form or request twice. If you are unsure whether a submission went through (an error, a timeout, a page that reloaded), check for it first (a confirmation, the list of requests, a sent folder) before trying again.
 `;
+const DEV_NOTE = `- Programming and IT work on the web: to read or change code in an online editor (VS Code for the web, GitHub, Replit, Jupyter, CodePen, Apps Script, cloud consoles), use code_editor rather than typing; then save or run it as the site expects and check the output, errors and console. devtools gives page performance, an SEO/accessibility audit, a passive security review, element inspection, errors and a network log. For code you need to run yourself (data processing, a quick script, a calculation), use code execution if you have it. Security work is defensive: review and harden what the user owns or is authorized to test; never attack, scan or break into systems.`;
 const NOTES_NOTE = `- Long tasks: keep the plan, progress and findings in task_notes as you go. Long conversations are summarized automatically and the notebook is handed back word for word, so you can keep working for as long as the task needs.`;
 const WORK_NOTE = `- When the user wants results as a file (Excel, Word, PDF, CSV…), make it with export_file. When they want to repeat or schedule a task, save it with skill_save.`;
 const HELPERS_NOTE = `- Work that splits into independent parts (the same lookup on several sites, several long documents) goes faster with delegate_tasks: up to 4 helpers work at the same time, each in its own window. Give each one complete instructions; combine their answers yourself.`;
@@ -93,10 +94,10 @@ export function domainSkills(urls) {
   return DOMAIN_SKILLS.filter((s) => hosts.some((h) => s.match.test(h)));
 }
 
-export async function buildSystem({ mode, tabs = [], quick = false, toolset = false, web = false, memory = false, advisor = false, helpers = false }) {
+export async function buildSystem({ mode, tabs = [], quick = false, toolset = false, web = false, memory = false, advisor = false, helpers = false, dev = true }) {
   const info = await chrome.runtime.getPlatformInfo();
   const platform = info.os === 'mac' ? 'macOS (use "cmd" for shortcuts)' : info.os === 'win' ? 'Windows (use "ctrl" for shortcuts)' : `${info.os} (use "ctrl" for shortcuts)`;
-  const how = [toolset ? HOW_TOOLSET : HOW_CLASSIC, web ? WEB_NOTE : '', memory ? MEMORY_NOTE : '', STEPS_NOTE.trim(), NOTES_NOTE, WORK_NOTE, helpers ? HELPERS_NOTE : '', advisor ? ADVISOR_NOTE : '', FILES_NOTE].filter(Boolean).join('\n');
+  const how = [toolset ? HOW_TOOLSET : HOW_CLASSIC, web ? WEB_NOTE : '', memory ? MEMORY_NOTE : '', STEPS_NOTE.trim(), dev ? DEV_NOTE : '', NOTES_NOTE, WORK_NOTE, helpers ? HELPERS_NOTE : '', advisor ? ADVISOR_NOTE : '', FILES_NOTE].filter(Boolean).join('\n');
   const main = `${INTRO}\n\n${how}\n\n${SAFETY}`;
   const blocks = [
     { type: 'text', text: quick ? QUICK_PROMPT : main },

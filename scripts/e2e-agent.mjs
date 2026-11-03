@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.dirname(fileURLToPath(import.meta.url));
 const extPath = process.env.EXT_PATH || path.join(root, '..', 'extension');
 const html = fs.readFileSync(path.join(root, 'fixtures', 'test.html'));
+const editorsHtml = fs.readFileSync(path.join(root, 'fixtures', 'editors.html'));
 const outDir = process.env.OUT_DIR || os.tmpdir();
 
 const requests = [];
@@ -354,7 +355,8 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
-  res.writeHead(200, { 'content-type': 'text/html' });
+  if (req.url.startsWith('/editors.html')) { res.writeHead(200, { 'content-type': 'text/html', 'x-frame-options': 'DENY' }); return res.end(editorsHtml); }
+  res.writeHead(200, { 'content-type': 'text/html', 'x-powered-by': 'Express' });
   res.end(html);
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -411,7 +413,7 @@ check('long history: summarized on the server at 250k tokens (compaction), outpu
 check('task named for the cost log', decodeURIComponent(requests[0].headers['x-infera-task'] || '') === 'What is on this page?');
 const t0 = requests[0].body.tools;
 check('tools: web search/fetch first, own tools w/ eager streaming, memory, cache_control',
-  t0.length === 34 && t0.some((t) => t.name === 'task_steps') && t0.some((t) => t.name === 'export_file') && t0.some((t) => t.name === 'delegate_tasks') && t0.some((t) => t.name === 'task_notes') && t0.some((t) => t.name === 'memory_search') && t0[0].type === 'web_search_20260318' && t0[0].response_inclusion === 'excluded' && t0[1].type === 'web_fetch_20260318'
+  t0.length === 36 && t0.some((t) => t.name === 'code_editor') && t0.some((t) => t.name === 'devtools') && t0.some((t) => t.name === 'task_steps') && t0.some((t) => t.name === 'export_file') && t0.some((t) => t.name === 'delegate_tasks') && t0.some((t) => t.name === 'task_notes') && t0.some((t) => t.name === 'memory_search') && t0[0].type === 'web_search_20260318' && t0[0].response_inclusion === 'excluded' && t0[1].type === 'web_fetch_20260318'
   && !t0[0].eager_input_streaming && t0[2].eager_input_streaming === true && t0.some((t) => t.name === 'memory_save') && t0.some((t) => t.name === 'all_tabs') && !!t0.at(-1).cache_control,
   t0.map((t) => t.name || t.type).join(','));
 check('tab context in first user msg', JSON.stringify(requests[0].body.messages[0]).includes('<tab_context>'));
@@ -714,6 +716,99 @@ await sw.evaluate(async () => {
   const cur = (await chrome.storage.local.get('settings')).settings || {};
   await chrome.storage.local.set({ auth: { kind: 'infera', server: cur.inferaUrl, accessToken: 'inf_test', clientId: 'c1' } });
 });
+
+// Developer tools: code editors read and written through their own APIs, page diagnostics,
+// a passive security review, and a network log file.
+const dev = await sw.evaluate(async ({ base }) => {
+  const I = self.__infera;
+  const tab = await chrome.tabs.create({ url: `${base}/editors.html`, active: true });
+  await new Promise((r) => setTimeout(r, 800));
+  const s = new I.AgentSession({ kind: 'panel' });
+  await I.tabGroups.adoptTab(s.id, tab.id, 'panel');
+  const ctx = { sessionId: s.id, kind: 'panel', mode: 'skip_all_permission_checks', allTabsAccess: true, requestApproval: async () => 'once', signal: new AbortController().signal, toolUseId: 'd' };
+  const T = (name, input) => I.executeTool(name, { tabId: tab.id, ...input }, ctx).then((r) => ({ text: r.content.map((c) => c.text || '').join(''), err: !!r.isError }));
+  const out = {};
+  out.list = await T('code_editor', { action: 'list' });
+  out.read = await T('code_editor', { action: 'read', editor: 0 });
+  out.fix = await T('code_editor', { action: 'replace', editor: 0, find: 'return a - b;', replace_with: 'return a + b;' });
+  out.monaco = await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: () => window.monaco.editor.getEditors()[0].getModel().getValue() }).then((r) => r[0].result);
+  out.ambiguous = await T('code_editor', { action: 'replace', editor: 4, find: 'x' });
+  out.cm5 = await T('code_editor', { action: 'write', editor: 2, text: 'print("hi")\nprint("there")' });
+  out.ace = await T('code_editor', { action: 'insert', editor: 3, line: 1, text: '/* theme */' });
+  out.cm6 = await T('code_editor', { action: 'replace', editor: 1, find: '*', replace_with: 'id, name' });
+  out.after = await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: () => ({ cm5: document.getElementById('cm5').CodeMirror.getValue(), ace: document.getElementById('ace').env.editor.getValue(), cm6: document.querySelector('#cm6 .cm-content').cmView.rootView.view.state.doc.toString(), ta: document.getElementById('code').value }) }).then((r) => r[0].result);
+  out.ta = await T('code_editor', { action: 'write', editor: 4, text: 'SELECT 2;' });
+  out.taAfter = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => document.getElementById('code').value }).then((r) => r[0].result);
+  out.perf = await T('devtools', { action: 'performance' });
+  out.audit = await T('devtools', { action: 'audit' });
+  out.security = await T('devtools', { action: 'security' });
+  out.inspect = await T('devtools', { action: 'inspect', selector: '#code' });
+  out.storage = await T('devtools', { action: 'storage' });
+  out.errors = await T('devtools', { action: 'errors' });
+  await chrome.tabs.reload(tab.id);
+  await new Promise((r) => setTimeout(r, 900));
+  out.har = await T('devtools', { action: 'har' });
+  await chrome.tabs.remove(tab.id);
+  return out;
+}, { base });
+check('code editor: finds Monaco, CodeMirror 5 and 6, Ace and a text area', /editor 0: monaco · javascript · \/src\/math\.js/.test(dev.list.text) && /codemirror5 · python/.test(dev.list.text) && /ace · css/.test(dev.list.text) && /codemirror6/.test(dev.list.text) && /textarea/.test(dev.list.text), dev.list.text);
+check('code editor: reads numbered lines and fixes a bug in Monaco, verified', /2\|   return a - b;/.test(dev.read.text) && /verified/.test(dev.fix.text) && dev.monaco.includes('return a + b;'), JSON.stringify({ r: dev.read.text.slice(0, 120), f: dev.fix.text, m: dev.monaco }));
+check('code editor: write, insert and replace in CodeMirror 5, Ace and CodeMirror 6', dev.after.cm5 === 'print("hi")\nprint("there")' && dev.after.ace === '/* theme */\nbody { color: red; }' && dev.after.cm6 === 'SELECT id, name FROM users;', JSON.stringify(dev.after));
+check('code editor: a missing snippet is refused with a reason; a text area is written', dev.ambiguous.err && /not found/.test(dev.ambiguous.text) && dev.taAfter === 'SELECT 2;', `${dev.ambiguous.text} | ${dev.taAfter}`);
+check('devtools: performance, audit and inspect', /"ttfb"/.test(dev.perf.text) && /"resources"/.test(dev.perf.text) && /No meta description/.test(dev.audit.text) && /"matches": 1/.test(dev.inspect.text) && /"tag": "textarea"/.test(dev.inspect.text), dev.audit.text.slice(0, 200));
+check('devtools: passive security review reads headers and flags what is missing', /"x-frame-options": "DENY"/.test(dev.security.text) && /not served over HTTPS/.test(dev.security.text) && /Content-Security-Policy/.test(dev.security.text) && !/clickjacking/.test(dev.security.text), dev.security.text.slice(0, 300));
+check('devtools: storage shows names only; errors and HAR', /"localStorage"/.test(dev.storage.text) && !dev.errors.err && /Saved \d+ request\(s\) as 127\.0\.0\.1-.*\.har/.test(dev.har.text), `${dev.errors.text.slice(0, 80)} | ${dev.har.text}`);
+
+// Fast replay: a recorded workflow runs from its steps without the model; a missing element
+// hands over to the agent; one run per CSV row; and the steps as a Playwright test.
+requests.length = 0;
+const fastRun = await sw.evaluate(async ({ base }) => {
+  const I = self.__infera;
+  const recorded = [
+    { action: 'navigate', url: `${base}/test.html?replay` },
+    { action: 'type', value: 'Mona', target: { tag: 'input', name: 'Full name', selector: '#name' } },
+    { action: 'select', value: 'Blue', target: { tag: 'select', name: 'Red Green Blue', selector: '#color' } },
+    { action: 'toggle', value: true, target: { tag: 'input', name: 'I agree', selector: '#agree', type: 'checkbox' } },
+    { action: 'click', target: { tag: 'button', name: 'Submit order', selector: '#go' } },
+  ];
+  const win = (await chrome.windows.getAll({ windowTypes: ['normal'] }))[0].id;
+  const sc = await I.panelCall(win, { type: 'save_shortcut', shortcut: { command: 'order-form', prompt: '1. Fill in the order form for {{name}}\n2. Submit it', params: [{ name: 'name', default: 'Mona' }], isWorkflow: true, recorded } });
+  const s = await I.sessionForWindow(win);
+  const steps = [];
+  s.subscribe((e) => { if (e.type === 'steps') steps.push(e.steps.map((x) => x.status[0]).join('')); });
+  await I.panelCall(win, { type: 'replay_workflow', id: sc.id, values: { name: 'Layla' } });
+  // Wait for this replay itself (the window's session may already be 'done' from an earlier task).
+  for (let i = 0; i < 80 && !(s.status === 'done' && s.steps.length === 5 && s.steps.every((x) => x.status === 'done')) && s.status !== 'error'; i++) await new Promise((r) => setTimeout(r, 200));
+  await new Promise((r) => setTimeout(r, 300));
+  const [tab] = await chrome.tabs.query({ active: true, windowId: win });
+  const out = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => document.getElementById('out').textContent }).then((r) => r[0].result);
+  const pw = await I.panelCall(win, { type: 'playwright_export', id: sc.id });
+  // A batch: one fast run per row.
+  await I.panelCall(win, { type: 'run_batch', id: sc.id, fast: true, rows: [{ name: 'Omar' }, { name: 'Sara' }] });
+  let b = null;
+  for (let i = 0; i < 100; i++) { b = await I.panelCall(win, { type: 'batch_state' }); if (b && !b.running) break; await new Promise((r) => setTimeout(r, 200)); }
+  const out2 = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => document.getElementById('out').textContent }).then((r) => r[0].result);
+  const notes = s.steps.map((x) => x.note).filter(Boolean).join(' | ');
+  return { status: s.status, steps: steps.at(-1), notes, out, pw, batch: b && { total: b.total, statuses: b.results.map((r) => r.status), running: b.running }, out2 };
+}, { base });
+check('fast replay: the recorded steps run without the model, with new values, shown as the live plan', fastRun.status === 'done' && fastRun.out === 'submitted:Layla:b:true' && fastRun.steps === 'ddddd' && requests.length === 0, JSON.stringify({ ...fastRun, pw: undefined, n: requests.length }));
+check('batch: one run per row, results kept', fastRun.batch?.total === 2 && fastRun.batch.statuses.join() === 'done,done' && fastRun.out2 === 'submitted:Sara:b:true', JSON.stringify(fastRun.batch) + fastRun.out2);
+check('playwright export: a runnable test from the recorded steps', /page\.goto\(".*test\.html\?replay"\)/.test(fastRun.pw.code) && /getByRole\("textbox", \{ name: "Full name" \}\)\.fill\("Mona"\)/.test(fastRun.pw.code) && /selectOption\(\{ label: "Blue" \}\)/.test(fastRun.pw.code) && /setChecked\(true\)/.test(fastRun.pw.code) && fastRun.pw.filename === 'order-form.spec.js', fastRun.pw.code.slice(0, 400));
+phase = 'plain';
+const handover = await sw.evaluate(async ({ base }) => {
+  const I = self.__infera;
+  const win = (await chrome.windows.getAll({ windowTypes: ['normal'] }))[0].id;
+  const sc = await I.panelCall(win, { type: 'save_shortcut', shortcut: { command: 'broken-flow', prompt: '1. Click Pay', recorded: [{ action: 'navigate', url: `${base}/test.html?broken` }, { action: 'click', target: { tag: 'button', name: 'Pay with card', selector: '#nope' } }] } });
+  const s = await I.panelCall(win, { type: 'new_chat' });
+  const live = await I.sessionForWindow(win);
+  const infos = [];
+  live.subscribe((e) => { if (e.type === 'info') infos.push(e.message); });
+  await I.panelCall(win, { type: 'replay_workflow', id: sc.id });
+  for (let i = 0; i < 80 && live.status !== 'done'; i++) await new Promise((r) => setTimeout(r, 250));
+  return { status: live.status, infos, steps: live.steps.map((x) => x.status), first: JSON.stringify(live.messages[0]?.content || '').slice(0, 2000), s: !!s };
+}, { base });
+check('fast replay: a step that cannot be done hands over to the agent from there', handover.status === 'done' && handover.steps.join() === 'done,failed' && /the agent continues from here/.test(handover.infos.join(' ')) && /did steps 1–1 of 2 and stopped at step 2/.test(handover.first) && requests.length >= 1, JSON.stringify({ ...handover, first: handover.first.slice(0, 300) }));
+phase = 'normal';
 
 // UI pages render
 const sp = await ctx.newPage();

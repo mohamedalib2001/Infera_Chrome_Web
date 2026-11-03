@@ -27,6 +27,8 @@ What you can do
 • Operating modes — Auto, Fast, Balanced, Power — so each task gets the right model and cost
 • A workflow studio: record, edit steps (if / for each / wait / verify), templates, import and export
 • A usage dashboard: today, this week and this month, by model
+• For developers and IT: edits code in online editors (VS Code for the web, GitHub, Replit, Jupyter, Apps Script), performance and SEO/accessibility audits, a passive security-headers review, element inspection and network logs
+• Fast replay of recorded workflows without AI, one run per row of a CSV file, and export as a Playwright test
 
 Your INFERA Agent account
 Sign in with your inferaagent.com account (password, Google or SSO). No API keys: usage is paid from your INFERA Agent credits, and the model key never reaches your browser.

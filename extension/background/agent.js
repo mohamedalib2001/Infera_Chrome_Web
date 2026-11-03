@@ -6,7 +6,7 @@
 //               language, we execute the batch, then send a fresh screenshot.
 import { streamMessage, modelInfo } from './llm.js';
 import { executeTool } from './tools/executor.js';
-import { PANEL_TOOLS, MEMORY_TOOLS, ALL_TABS_TOOLS, TASK_TOOLS, WORK_TOOLS, DESKTOP_TOOLS, TOOL_BY_NAME } from './tools/definitions.js';
+import { PANEL_TOOLS, MEMORY_TOOLS, ALL_TABS_TOOLS, TASK_TOOLS, WORK_TOOLS, DESKTOP_TOOLS, DEV_TOOLS, TOOL_BY_NAME } from './tools/definitions.js';
 import { nativeBridge } from './native-bridge.js';
 import { webTools, SERVER_RESULT_TYPES, summarizeServerResult, citedSources } from './tools/web-tools.js';
 import { listMemory, memoryBlock } from './memory.js';
@@ -42,7 +42,7 @@ const MAX_HELPERS = 4;
 const ACCOUNT_COPY_MAX = 4 * 1024 * 1024;
 const HISTORY_LIMIT = 50;
 // Our own tools that act on a page (not just read it): not run after the user took over mid-batch.
-const BROWSER_ACTION_TOOLS = new Set(['computer', 'navigate', 'form_input', 'javascript_tool', 'browser_batch', 'file_upload', 'upload_image']);
+const BROWSER_ACTION_TOOLS = new Set(['computer', 'navigate', 'form_input', 'javascript_tool', 'browser_batch', 'file_upload', 'upload_image', 'code_editor']);
 const THUMB_W = 240;
 
 // A small JPEG of the latest screenshot for the history list (kept in this browser only).
@@ -294,6 +294,7 @@ export class AgentSession {
     this.runCost = 0;
     this.budgetLimit = Number(settings.taskBudget) || 0;
     this.runStartedAt = Date.now();
+    this.devTools = settings.devTools !== false;
     this.paused = false;
     this.takenOver = false;
     this.setStatus('running');
@@ -480,9 +481,10 @@ export class AgentSession {
   // (another permission mode, a site with extra know-how) are appended to the
   // conversation as notes instead.
   async #ensureSystem({ mode, tabs, toolset, web = false, memory = false, advisor = false, helpers = false }) {
-    const key = `${toolset}|${web}|${memory}|${advisor}|${helpers}`;
+    const dev = this.devTools !== false;
+    const key = `${toolset}|${web}|${memory}|${advisor}|${helpers}|${dev}`;
     if (this.system && this.systemKey === key) return;
-    this.system = await buildSystem({ mode, tabs, toolset, web, memory, advisor, helpers });
+    this.system = await buildSystem({ mode, tabs, toolset, web, memory, advisor, helpers, dev });
     this.systemKey = key;
     this.notedMode = mode;
     this.notedSkills = new Set(domainSkills(tabs.map((t) => t.url)).map((s) => s.name));
@@ -547,7 +549,7 @@ export class AgentSession {
     const work = WORK_TOOLS.filter((t) => t.name !== 'delegate_tasks' || this.depth === 0);
     // The desktop agent, while Infera Agent Desktop is running (checked once per task, so the tool list stays stable).
     if (this.depth === 0 && await nativeBridge.desktopReady().catch(() => false)) work.push(...DESKTOP_TOOLS);
-    const extras = () => [...(settings.allTabsAccess !== false ? ALL_TABS_TOOLS : []), ...(settings.memory !== false ? MEMORY_TOOLS : []), ...TASK_TOOLS, ...work, ...remoteDefs];
+    const extras = () => [...(settings.allTabsAccess !== false ? ALL_TABS_TOOLS : []), ...(settings.memory !== false ? MEMORY_TOOLS : []), ...TASK_TOOLS, ...work, ...(settings.devTools !== false ? DEV_TOOLS : []), ...remoteDefs];
     const toolList = (ts) => [
       ...(ts ? [BROWSER_TOOLSET] : []),
       ...(useWeb() ? webTools(settings, policy) : []),

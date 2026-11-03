@@ -308,6 +308,24 @@ only `navigate` works. CAPTCHA and sign-in pages are detected and handed back to
   inline SVG icons; no external fonts, frameworks or network requests. `scripts/perf.mjs` measures the
   side panel's time to interactive, JS heap, DOM size and the package against fixed budgets.
 
+## Developer tools, fast replay and batches (2.2)
+
+* `tools/dev-tools.js` — page scripts run in the page's own world (CDP `Runtime.evaluate`, REPL mode
+  with top-level await): the editor adapters (Monaco `monaco.editor.getEditors()`, CodeMirror 6
+  `.cm-content` → `cmView.rootView.view`, CodeMirror 5 `element.CodeMirror`, Ace `element.env.editor`,
+  DOM-only Monaco by paste, text areas through the native value setter), performance, audit, the
+  passive security review, inspection and storage names; `toHar()` builds a HAR 1.2 log without headers
+  or bodies. Tools `code_editor` and `devtools` (`DEV_TOOLS`, setting `devTools`); editing needs the same
+  approval as typing, reading the same as reading a page.
+* `replay.js` — `replayPlan()` drops navigations caused by a click or key; `replay()` runs each step
+  (find → wait up to 6 s → act → let the page settle), checks the site against the blocklist before
+  acting, refuses redacted values, and reports per-step progress; `toPlaywright()` writes the test.
+  Recorded steps (no screenshots) are kept with the workflow (`recorded`, up to 300).
+* Service worker — `replayInSession()` shows the replay as the live plan and hands a failed step to
+  `AgentSession.run()` with the workflow and the point reached; `runBatch()` runs one session per row
+  and posts `batch` events to the panel; panel messages `replay_workflow`, `run_batch`, `stop_batch`,
+  `batch_state`, `playwright_export`.
+
 ## Not included
 
 * The report's Cowork cloud container (terminal, Python, file production) is a separate cloud product;

@@ -20,6 +20,7 @@ import { completeText, validateInput } from '../llm.js';
 import { listShortcuts, findShortcut, saveShortcut } from '../shortcuts.js';
 import { saveTask } from '../scheduler.js';
 import { buildFile } from './files.js';
+import { editorScript, pasteScript, devScripts, toHar } from './dev-tools.js';
 import { nativeBridge } from '../native-bridge.js';
 import { saveMemory, searchMemory, forgetMemory } from '../memory.js';
 import { TOOL_BY_NAME } from './definitions.js';
@@ -676,6 +677,78 @@ const impl = {
       when = task.nextRun ? ` Scheduled (${sch.frequency}); next run ${new Date(task.nextRun).toLocaleString()}.` : ' Scheduled.';
     }
     return ok(text(`Saved the skill /${sc.command}${params.length ? ` with ${params.map((p) => `{{${p.name}}}`).join(', ')}` : ''}. The user can run it from the side panel by typing /${sc.command}.${when}`));
+  },
+
+  // ---------- developer tools ----------
+  async code_editor(ctx, input) {
+    const tab = await resolveTab(ctx, Number(input.tabId ?? input.tab_id));
+    const act = input.action;
+    const args = { editor: input.editor, text: input.text, find: input.find, replace_with: input.replace_with, all: input.all, line: input.line, from_line: input.from_line, to_line: input.to_line };
+    const writing = ['write', 'replace', 'insert'].includes(act);
+    if (!['list', 'read', 'write', 'replace', 'insert'].includes(act)) fail('action must be list, read, write, replace or insert.');
+    const netloc = await authorize(ctx, tab, writing ? P.CLICK : P.READ_PAGE_CONTENT,
+      writing ? `Edit the code in the editor on ${tab.title || tab.url} (${act})` : `Read the code editors on ${tab.title || tab.url}`);
+    if (writing) await reverify(tab.id, netloc);
+    let r;
+    try { r = (await cdp.evaluate(tab.id, editorScript(act, args))).value; } catch (e) { fail(e.message); }
+    if (act === 'list') {
+      if (!r?.length) return ok(text('No code editor found on this page. If the editor is inside an iframe, open the iframe\'s page in a tab; otherwise click into the editor and take a screenshot.'));
+      return ok(text(r.map((e) => `editor ${e.editor}: ${e.kind}${e.language ? ` · ${e.language}` : ''}${e.path ? ` · ${e.path}` : ''} · ${e.lines} lines${e.writable ? '' : ' · written by paste'}${e.visibleOnly ? ' · reads only the visible lines' : ''}`).join('\n')));
+    }
+    if (act === 'read') return ok(text(`${r.kind}: lines ${r.from}-${r.to} of ${r.total}${r.visibleOnly ? ' (only the lines on screen; scroll to read more)' : ''}\n${r.text}`));
+    if (r?.needsPaste) {
+      // No editor API in reach: focus the editor, select all, and paste the new content.
+      if (!r.point) fail('The editor is not visible; scroll it into view and retry.');
+      await cdp.click(tab.id, r.point.x, r.point.y);
+      const mac = (await chrome.runtime.getPlatformInfo()).os === 'mac';
+      await cdp.pressCombo(tab.id, mac ? 'cmd+a' : 'ctrl+a');
+      await cdp.evaluate(tab.id, pasteScript(r.text));
+      await recordFrame(tab.id, { type: 'type', label: 'Edit code' });
+      return ok(text(`Pasted the new content into the ${r.kind} editor (${r.text.split('\n').length} lines). This editor cannot be read back in full: take a screenshot to check it, then save.`));
+    }
+    await recordFrame(tab.id, { type: 'type', label: 'Edit code' });
+    return ok(text(`${r.kind}: ${act} done, ${r.lines} lines now${r.verified ? ', verified by reading it back' : ' — the editor shows different content than written; read it again'}. Save or run it as the site expects.`));
+  },
+
+  async devtools(ctx, input) {
+    const tab = await resolveTab(ctx, Number(input.tabId ?? input.tab_id));
+    const act = input.action;
+    await authorize(ctx, tab, P.READ_PAGE_CONTENT, `Inspect ${tab.title || tab.url} (${act})`);
+    const json = (o) => ok(text(JSON.stringify(o, null, 1).slice(0, 60_000)));
+    const run = async (expr) => { try { return (await cdp.evaluate(tab.id, expr)).value; } catch (e) { return fail(e.message); } };
+    if (act === 'performance') return json(await run(devScripts.performance()));
+    if (act === 'audit') return json(await run(devScripts.audit()));
+    if (act === 'security') return json(await run(devScripts.security()));
+    if (act === 'storage') return json(await run(devScripts.storage()));
+    if (act === 'inspect') {
+      if (!input.selector) fail('Give a CSS selector to inspect.');
+      return json(await run(devScripts.inspect(input.selector)));
+    }
+    const fresh = !cdp.isAttached(tab.id);
+    await cdp.attach(tab.id);
+    const st = cdp.state(tab.id);
+    const host = safeHost(tab.url);
+    const reqs = st.networkOrder.map((id) => st.network.get(id)).filter(Boolean);
+    const note = fresh ? 'Capture started just now: reload the page (navigate to the same URL) and run this again to include the page load.' : '';
+    if (act === 'errors') {
+      const errs = st.console.filter((m) => m.host === host && (m.level === 'error' || m.level === 'assert')).slice(-50);
+      const bad = reqs.filter((r) => r.error || r.status >= 400).slice(-50);
+      return ok(text([note, `${errs.length} console error(s):`, ...errs.map((m) => `  [${m.level}] ${m.text}${m.source ? `  (${m.source})` : ''}`),
+        `${bad.length} failed request(s):`, ...bad.map((r) => `  ${r.method} ${r.status ?? 'ERR'} ${r.url}${r.error ? ` — ${r.error}` : ''}`)].filter(Boolean).join('\n')));
+    }
+    if (act === 'har') {
+      if (!reqs.length) fail(`No requests captured yet. ${note || 'Reload the page and try again.'}`);
+      const har = JSON.stringify(toHar(reqs, { title: tab.title }), null, 1);
+      const bytes = new TextEncoder().encode(har);
+      let bin = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      const name = `${(host || 'page').replace(/[^\w.-]+/g, '_')}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.har`;
+      const path = await saveToDisk(btoa(bin), 'application/json', name);
+      const saved = String(path).split(/[\\/]/).pop();
+      // Chrome may number a name already taken ("x (1).har"); some builds store a temporary id.
+      return ok(text(`Saved ${reqs.length} request(s) as ${saved.startsWith(name.replace(/\.har$/, '')) ? saved : name} in Downloads (URLs, methods, status, types and timing; no headers or bodies). ${note}`));
+    }
+    return fail('action must be performance, audit, security, inspect, errors, storage or har.');
   },
 
   async all_tabs(ctx, input) {

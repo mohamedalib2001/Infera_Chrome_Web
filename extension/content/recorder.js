@@ -25,7 +25,8 @@
 
   function label(el) {
     const t = el.closest('a,button,input,select,textarea,[role],label') || el;
-    const name = t.getAttribute('aria-label') || t.innerText || t.value || t.placeholder || t.title || t.alt || '';
+    // Same order as fast replay looks it up: aria-label, the field's <label>, its text.
+    const name = t.getAttribute('aria-label') || [...(t.labels || [])].map((l) => l.innerText).join(' ') || t.innerText || t.placeholder || t.title || t.alt || (['button', 'submit'].includes(t.type) ? t.value : '') || '';
     return { tag: t.tagName.toLowerCase(), role: t.getAttribute('role') || '', name: String(name).replace(/\s+/g, ' ').trim().slice(0, 100), selector: cssPath(t), type: t.type || '' };
   }
 

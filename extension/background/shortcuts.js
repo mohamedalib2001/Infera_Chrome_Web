@@ -24,6 +24,8 @@ export async function saveShortcut(s) {
     // The workflow studio's step list ({kind: do|if|each|wait|check, text}); the prompt is compiled from it.
     steps: Array.isArray(s.steps) ? s.steps.filter((x) => String(x?.text || '').trim()).slice(0, 100).map((x) => ({ kind: ['do', 'if', 'each', 'wait', 'check'].includes(x.kind) ? x.kind : 'do', text: String(x.text).slice(0, 2000) })) : undefined,
     startUrl: s.startUrl || '',
+    // Recorded steps (no screenshots) for fast replay without the model.
+    recorded: Array.isArray(s.recorded) ? s.recorded.slice(0, 300).map((x) => ({ action: String(x.action || ''), url: x.url ? String(x.url).slice(0, 2000) : undefined, value: x.value, target: x.target ? { tag: x.target.tag, role: x.target.role, name: String(x.target.name || '').slice(0, 100), selector: String(x.target.selector || '').slice(0, 300), type: x.target.type } : undefined })) : undefined,
     model: s.model || '',
     createdAt: s.createdAt || Date.now(),
     updatedAt: Date.now(),

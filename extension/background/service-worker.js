@@ -22,6 +22,7 @@ import { ACCOUNT_ALARM, orgPolicy, refreshOrgPolicy, pollAccountTasks } from './
 import { listMemory, forgetMemory, clearMemory } from './memory.js';
 import { listServers, saveServer, deleteServer } from './remote-mcp.js';
 import { routeTask, routeStats, MODE_IDS } from './router.js';
+import { replay, replayPlan, stepTitle, toPlaywright } from './replay.js';
 
 // ---------------- session registry ----------------
 const sessions = new Map();        // sessionId -> AgentSession
@@ -246,6 +247,30 @@ async function handlePanel(msg, s, port) {
       s.run(renderShortcut(sc, msg.values || {}), { startTabId: tab?.id }).catch((e) => port.postMessage({ type: 'error', message: e.message }));
       return { ok: true };
     }
+    case 'replay_workflow': {
+      const sc = (await listShortcuts()).find((x) => x.id === msg.id);
+      if (!sc?.recorded?.length) throw new Error('This workflow has no recorded steps to replay.');
+      if (s.busy()) throw new Error('A task is already running in this conversation.');
+      const [tab] = await chrome.tabs.query({ active: true, windowId });
+      replayInSession(s, sc, tab.id, msg.values || {}).catch((e) => port.postMessage({ type: 'error', message: e.message }));
+      return { ok: true };
+    }
+    case 'playwright_export': {
+      const sc = (await listShortcuts()).find((x) => x.id === msg.id);
+      if (!sc?.recorded?.length) throw new Error('This workflow has no recorded steps.');
+      return { filename: `${sc.command}.spec.js`, code: toPlaywright(sc) };
+    }
+    case 'run_batch': {
+      const sc = (await listShortcuts()).find((x) => x.id === msg.id);
+      if (!sc) throw new Error('Workflow not found');
+      const rows = (Array.isArray(msg.rows) ? msg.rows : []).slice(0, 500);
+      if (!rows.length) throw new Error('The file has no rows.');
+      if (batch?.running) throw new Error('A batch is already running.');
+      runBatch(port, windowId, sc, rows, !!msg.fast && !!sc.recorded?.length).catch((e) => port.postMessage({ type: 'error', message: e.message }));
+      return { ok: true, rows: rows.length };
+    }
+    case 'stop_batch': if (batch) { batch.stopped = true; batch.current?.stop(); } return { ok: true };
+    case 'batch_state': return batch ? { ...batch, current: undefined } : null;
     case 'save_task': return saveTask(msg.task);
     case 'delete_task': await deleteTask(msg.id); return listTasks();
     case 'list_tasks': return listTasks();
@@ -291,6 +316,84 @@ async function handlePanel(msg, s, port) {
     }
     default: throw new Error(`Unknown panel message ${msg.type}`);
   }
+}
+
+// ---------------- fast replay and batches ----------------
+// A recorded workflow runs from its recorded steps without the model, shown as the live
+// plan; if a step cannot be done, the agent takes over from there with the full workflow.
+async function replayInSession(s, sc, tabId, values = {}, { fallback = true } = {}) {
+  const ar = (await getSettings()).language === 'ar' || (navigator.language || '').startsWith('ar');
+  const plan = replayPlan(sc.recorded);
+  s.title = s.title || `/${sc.command}`;
+  s.steps = plan.map((x) => ({ title: stepTitle(x, ar), status: 'pending', note: '' }));
+  s.abort = new AbortController();
+  s.runStartedAt = Date.now();
+  s.setStatus('running');
+  s.emit({ type: 'steps', steps: s.steps });
+  s.emit({ type: 'info', message: ar ? `تشغيل سريع لـ /${sc.command}: ${plan.length} خطوة بدون الذكاء الاصطناعي.` : `Fast replay of /${sc.command}: ${plan.length} steps, without the model.` });
+  const r = await replay(sc, {
+    tabId, values, signal: s.abort.signal,
+    onStep: (i, st, note) => {
+      const step = s.steps[i];
+      if (st === 'start') step.status = 'active';
+      else if (st === 'done') step.status = 'done';
+      else { step.status = 'failed'; step.note = String(note || '').slice(0, 160); }
+      s.emit({ type: 'steps', steps: s.steps });
+    },
+  });
+  if (r.ok) {
+    s.setStatus('done');
+    s.emit({ type: 'info', message: ar ? `اكتمل التشغيل السريع: ${r.done} خطوة.` : `Fast replay finished: ${r.done} steps.` });
+    s.emit({ type: 'turn_end', status: 'done' });
+    return { ok: true, answer: `Replayed ${r.done} steps.` };
+  }
+  s.setStatus(s.abort.signal.aborted ? 'stopped' : 'idle');
+  if (s.abort.signal.aborted || !fallback) { s.emit({ type: 'turn_end', status: s.status }); return { ok: false, answer: r.reason }; }
+  s.emit({ type: 'info', message: ar ? `توقف التشغيل السريع عند الخطوة ${r.failedAt + 1} (${r.reason}) — يكمل الوكيل الذكي من هنا.` : `Fast replay stopped at step ${r.failedAt + 1} (${r.reason}) — the agent continues from here.` });
+  let prompt = renderShortcut(sc, values);
+  prompt = `A fast replay of the recorded workflow /${sc.command} did steps 1–${r.failedAt} of ${plan.length} and stopped at step ${r.failedAt + 1} ("${stepTitle(plan[r.failedAt])}"): ${r.reason}\nLook at the current page and finish the workflow from there (do not redo the steps already done).\n\nThe workflow:\n${prompt}`;
+  await s.run(prompt, { startTabId: tabId });
+  return { ok: s.status === 'done', answer: lastAnswer(s) };
+}
+
+function lastAnswer(s) {
+  const m = [...s.messages].reverse().find((x) => x.role === 'assistant' && Array.isArray(x.content) && x.content.some((b) => b.type === 'text' && b.text.trim()));
+  return (m?.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim().slice(0, 2000);
+}
+
+// One run of a workflow per row of a table (CSV columns = the workflow's variables), one
+// after the other, each in a conversation of its own; progress goes to the panel.
+let batch = null;
+async function runBatch(port, windowId, sc, rows, fast) {
+  batch = { running: true, stopped: false, command: sc.command, total: rows.length, results: [], startedAt: Date.now() };
+  const post = (extra = {}) => { try { port.postMessage({ type: 'batch', ...batch, current: undefined, ...extra }); } catch { /* panel closed */ } };
+  post();
+  for (let i = 0; i < rows.length && !batch.stopped; i++) {
+    const row = rows[i];
+    const child = new AgentSession({ kind: 'panel', windowId, title: `/${sc.command} · ${i + 1}/${rows.length}` });
+    wireSession(child);
+    sessions.set(child.id, child);
+    batch.current = child;
+    // Approvals of a row's task appear in the panel.
+    const off = child.subscribe(({ sessionId, ...ev }) => { // eslint-disable-line no-unused-vars
+      if (ev.type === 'permission_request' || ev.type === 'plan_request') { try { port.postMessage({ ...ev, request: { ...ev.request, description: `${sc.command} · ${i + 1}: ${ev.request.description || ''}` } }); } catch { /* panel closed */ } }
+    });
+    post({ row: i });
+    let res;
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, windowId });
+      if (fast) res = await replayInSession(child, sc, tab.id, row);
+      else { await child.run(renderShortcut(sc, row), { startTabId: tab?.id }); res = { ok: child.status === 'done', answer: lastAnswer(child) }; }
+    } catch (e) { res = { ok: false, answer: e.message }; }
+    off();
+    batch.results.push({ row: i + 1, values: row, status: res.ok ? 'done' : child.status === 'stopped' || batch.stopped ? 'stopped' : 'error', answer: res.answer || '', conversation: child.id, cost: child.cost || 0 });
+    post();
+  }
+  batch.running = false;
+  batch.current = null;
+  batch.finishedAt = Date.now();
+  await setLocal('lastBatch', { ...batch });
+  post({ finished: true });
 }
 
 // ---------------- one-shot messages (options page, content scripts, popups) ----------------

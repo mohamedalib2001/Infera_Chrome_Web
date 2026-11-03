@@ -370,6 +370,47 @@ export const TASK_TOOLS = [
   },
 ];
 
+// Developer tools: code editors on web pages and a DevTools layer (performance, audits,
+// security review, element inspection, errors, network log export).
+const TAB_ARG = {
+  tabId: { type: 'integer', description: 'The tab to act on (the browser toolset\'s tab_id as a number).' },
+};
+export const DEV_TOOLS = [
+  {
+    name: 'code_editor',
+    description: 'Read and edit code in code editors on web pages — Monaco (VS Code for the web, GitHub, Azure, many cloud consoles), CodeMirror 5/6 (Replit, Jupyter, CodePen, many CMSs), Ace (Cloud9, Apps Script, some admin panels) and large text areas. Use it instead of clicking and typing in an editor: it writes the whole change at once through the editor itself (no auto-indent or auto-closed brackets), keeps undo, and verifies the result. "list" finds the editors; "read" returns numbered lines; "write" replaces everything; "replace" swaps one exact snippet (copy it from "read", including indentation; set all=true for every occurrence); "insert" adds lines before a line number. After editing, save or run the code the way the site expects (its Save/Run button or keyboard shortcut) and check the result.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['list', 'read', 'write', 'replace', 'insert'] },
+        ...TAB_ARG,
+        editor: { type: 'integer', description: 'Which editor (from "list"); default 0.' },
+        text: { type: 'string', description: 'For write: the full new content. For insert: the lines to insert.' },
+        find: { type: 'string', description: 'For replace: the exact text to replace.' },
+        replace_with: { type: 'string', description: 'For replace: the new text.' },
+        all: { type: 'boolean', description: 'For replace: replace every occurrence.' },
+        line: { type: 'integer', description: 'For insert: insert before this line (1-based); omit to append.' },
+        from_line: { type: 'integer' },
+        to_line: { type: 'integer' },
+      },
+      required: ['action', 'tabId'],
+    },
+  },
+  {
+    name: 'devtools',
+    description: 'Developer and IT diagnostics for the page in a tab. "performance": load timings (TTFB, FCP, LCP, CLS), resources by type and size, the slowest requests, DOM size, JS memory. "audit": SEO, accessibility, mobile, HTML, security and performance problems with samples. "security": a passive review of the page\'s security headers (HSTS, CSP, clickjacking, nosniff, CORS), cookies readable by scripts, insecure forms and third-party scripts without integrity — it only reads, never probes. "inspect": an element (CSS selector) with its box, computed styles, attributes and HTML. "errors": console errors plus failed or 4xx/5xx requests. "storage": cookie and storage key names and sizes (never their values). "har": saves the captured network requests as a .har file in Downloads. Console and network capture start when the tab is first inspected: reload the page to capture its load.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['performance', 'audit', 'security', 'inspect', 'errors', 'storage', 'har'] },
+        ...TAB_ARG,
+        selector: { type: 'string', description: 'For inspect: a CSS selector.' },
+      },
+      required: ['action', 'tabId'],
+    },
+  },
+];
+
 // Work outside the browser, by Infera Agent Desktop on the person's computer
 // (offered only while the desktop app is running and linked).
 export const DESKTOP_TOOLS = [
@@ -450,4 +491,4 @@ export const WORK_TOOLS = [
 
 export const PANEL_TOOLS = [...MCP_TOOLS, ...CLASSIC_TOOLS];
 
-export const TOOL_BY_NAME = Object.fromEntries([...PANEL_TOOLS, ...MEMORY_TOOLS, ...ALL_TABS_TOOLS, ...TASK_TOOLS, ...WORK_TOOLS, ...DESKTOP_TOOLS].map((t) => [t.name, t]));
+export const TOOL_BY_NAME = Object.fromEntries([...PANEL_TOOLS, ...MEMORY_TOOLS, ...ALL_TABS_TOOLS, ...TASK_TOOLS, ...WORK_TOOLS, ...DESKTOP_TOOLS, ...DEV_TOOLS].map((t) => [t.name, t]));

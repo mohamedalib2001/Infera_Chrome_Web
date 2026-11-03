@@ -81,5 +81,8 @@ export async function stopRecording({ transcript = '', params = true } = {}) {
   } catch {
     draft = { command: 'recorded-workflow', description: 'Recorded workflow', prompt: `Repeat this workflow:\n${steps}`, params: [] };
   }
-  return { ...draft, startUrl: r.startUrl, isWorkflow: true, stepCount: r.steps.length, transcript };
+  // The raw steps too (without screenshots), for fast replay and Playwright export.
+  const recorded = r.steps.map(({ image, ts, ...s }) => s); // eslint-disable-line no-unused-vars
+  if (!recorded.length || recorded[0].action !== 'navigate') recorded.unshift({ action: 'navigate', url: r.startUrl });
+  return { ...draft, startUrl: r.startUrl, isWorkflow: true, stepCount: r.steps.length, transcript, recorded };
 }

@@ -87,6 +87,7 @@ function onEvent(ev) {
     case 'paused': live.takenOver = !!ev.takenOver; refreshLive(); break;
     case 'resumed': live.takenOver = false; refreshLive(); break;
     case 'session_switched': call('state').then(loadState); break;
+    case 'batch': renderBatch(ev); break;
     case 'turn_end': curText = null; curThinking = null; refreshConversations(); break;
     default:
   }
@@ -1046,6 +1047,9 @@ async function savedTab() {
       s.isWorkflow ? el('span', { class: 'badge' }, 'workflow') : null),
     el('div', { class: 'wf-actions' },
       el('button', { class: 'btn small primary', onclick: () => { closeViews(); send(`/${s.command}`); } }, ic('play'), t('run')),
+      s.recorded?.length ? el('button', { class: 'btn small', 'data-fast': s.command, onclick: async () => { if (!confirm(t('fastConfirm'))) return; closeViews(); lastUserText = `/${s.command}`; try { await call('replay_workflow', { id: s.id }); } catch (e) { addBanner(e.message); } } }, ic('bolt'), t('fastReplay')) : null,
+      el('button', { class: 'btn small', onclick: () => pickRows(s) }, ic('table'), t('runRows')),
+      s.recorded?.length ? el('button', { class: 'btn small', onclick: async () => { const r = await call('playwright_export', { id: s.id }); download(r.filename, r.code, 'text/javascript'); } }, ic('download'), t('playwright')) : null,
       el('button', { class: 'btn small', onclick: () => openEditor(s) }, ic('edit'), t('edit')),
       el('button', { class: 'btn small', onclick: () => showTaskForm({ name: s.command, prompt: s.prompt, startUrl: s.startUrl }) }, ic('calendar'), t('schedule')),
       el('button', { class: 'btn small', onclick: () => exportWorkflows([s]) }, ic('download'), t('wfExport')),
@@ -1065,6 +1069,74 @@ function templatesTab() {
     el('div', { class: 'wf-head' }, el('span', { class: 'wf-ic' }, ic(tp.icon)),
       el('div', { class: 'grow' }, el('div', { class: 't' }, tplTitle(tp.key)), el('div', { class: 's' }, `${tp.steps.length} ${t('steps')}`))),
     el('div', { class: 'wf-actions' }, el('button', { class: 'btn small primary', onclick: () => openEditor({ command: tp.command, description: tplTitle(tp.key), steps: tp.steps.map((text) => ({ kind: /^(لكل|For each)/.test(text) ? 'each' : /^(إذا|If )/.test(text) ? 'if' : /^(تحقّق|Verify)/.test(text) ? 'check' : 'do', text: text.replace(/^(For each |If |Verify that )/, '') })) }) }, t('useTemplate')))));
+}
+
+function download(name, textBody, type = 'text/plain') {
+  const a = el('a', { href: URL.createObjectURL(new Blob([textBody], { type })), download: name });
+  document.body.append(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+// CSV (or TSV) with a header row: quoted fields, embedded commas, quotes and new lines.
+function parseCsv(src) {
+  const textIn = String(src).replace(/^\uFEFF/, '');
+  const sep = (textIn.split('\n')[0].match(/\t/g) || []).length > (textIn.split('\n')[0].match(/,/g) || []).length ? '\t' : (textIn.split('\n')[0].match(/;/g) || []).length > (textIn.split('\n')[0].match(/,/g) || []).length ? ';' : ',';
+  const rows = [];
+  let row = [];
+  let f = '';
+  let q = false;
+  for (let i = 0; i < textIn.length; i++) {
+    const c = textIn[i];
+    if (q) {
+      if (c === '"' && textIn[i + 1] === '"') { f += '"'; i++; } else if (c === '"') q = false; else f += c;
+    } else if (c === '"') q = true;
+    else if (c === sep) { row.push(f); f = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && textIn[i + 1] === '\n') i++; row.push(f); f = ''; if (row.some((x) => x.trim())) rows.push(row); row = []; }
+    else f += c;
+  }
+  row.push(f);
+  if (row.some((x) => x.trim())) rows.push(row);
+  const [head = [], ...data] = rows;
+  const keys = head.map((h) => h.trim().replace(/\s+/g, '_'));
+  return data.map((r) => Object.fromEntries(keys.map((k, i) => [k, (r[i] ?? '').trim()])));
+}
+
+// Run a workflow once per row of a CSV file.
+function pickRows(sc) {
+  const vars = (sc.params || []).map((p) => p.name).join(', ') || '—';
+  const fast = el('input', { type: 'checkbox', checked: sc.recorded?.length ? true : undefined, disabled: sc.recorded?.length ? undefined : true });
+  const file = el('input', { type: 'file', accept: '.csv,.tsv,text/csv,text/tab-separated-values', id: 'batchFile', onchange: async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const rows = parseCsv(await f.text());
+    if (!rows.length) { alert(t('noRows')); return; }
+    closeViews();
+    try { await call('run_batch', { id: sc.id, rows, fast: fast.checked }); } catch (x) { addBanner(x.message); }
+  } });
+  openDrawer(`${t('runRows')} · /${sc.command}`, [el('div', { class: 'card form' }, el('p', { class: 'muted small', style: 'margin:0' }, t('csvPick', { vars })),
+    file, el('label', { class: 'check-row' }, fast, el('span', {}, t('fastRows'))))], 'btnStudio');
+}
+
+// The batch progress card in the conversation, updated in place.
+let batchCard = null;
+function renderBatch(b) {
+  if (!batchCard || !batchCard.isConnected) { batchCard = el('div', { class: 'card item', id: 'batchCard' }); $('#messages').append(batchCard); updateEmpty(); }
+  const ok = b.results.filter((r) => r.status === 'done').length;
+  const done = b.results.length;
+  put(batchCard,
+    el('div', { class: 'row' }, ic('table'), el('b', { class: 'grow' }, `${t('batchTitle')} · /${b.command}`), el('span', { class: `badge ${b.running ? 'warn' : ok === b.total ? 'ok' : 'danger'}` }, b.running ? t('batchProgress', { done, total: b.total }) : t('batchDone', { ok, bad: done - ok }))),
+    el('div', { class: 'ls-bar', style: 'position:static;height:4px;border-radius:4px;background:var(--surface-3)' }, el('i', { style: `width:${Math.round((done / b.total) * 100)}%` })),
+    el('ol', { class: 'small', style: 'margin:4px 0 0;padding-inline-start:18px;max-height:180px;overflow:auto' }, ...b.results.map((r) => el('li', { dir: 'auto' }, `${r.status === 'done' ? '✅' : r.status === 'stopped' ? '⏹' : '❌'} ${Object.values(r.values).slice(0, 2).join(' · ')} — ${String(r.answer).slice(0, 120)}`))),
+    el('div', { class: 'row' },
+      b.running ? el('button', { class: 'btn small danger', onclick: () => call('stop_batch') }, ic('stop'), t('stopBatch')) : null,
+      done ? el('button', { class: 'btn small', onclick: () => {
+        const cols = [...new Set(b.results.flatMap((r) => Object.keys(r.values)))];
+        const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+        const csv = [['row', ...cols, 'status', 'result', 'cost'].map(esc).join(','), ...b.results.map((r) => [r.row, ...cols.map((c) => r.values[c]), r.status, r.answer, r.cost].map(esc).join(','))].join('\n');
+        download(`${b.command}-results.csv`, `\uFEFF${csv}`, 'text/csv');
+      } }, ic('download'), t('downloadResults')) : null));
+  scroll();
 }
 
 function exportWorkflows(list) {
@@ -1305,6 +1377,6 @@ async function openMicSettings() {
 }
 
 // Old entry points kept for keyboard users and saved links.
-window.__inferaPanel = { openStudio, openLive, openCosts };
+window.__inferaPanel = { openStudio, openLive, openCosts, parseCsv };
 
 connect();
