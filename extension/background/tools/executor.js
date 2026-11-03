@@ -690,10 +690,29 @@ const impl = {
     const netloc = await authorize(ctx, tab, writing ? P.CLICK : P.READ_PAGE_CONTENT,
       writing ? `Edit the code in the editor on ${tab.title || tab.url} (${act})` : `Read the code editors on ${tab.title || tab.url}`);
     if (writing) await reverify(tab.id, netloc);
+    // The page and its same-origin frames first, then each cross-site frame (its own process).
+    const evalIn = async (session, op, a) => (session ? cdp.evaluateIn(tab.id, session, editorScript(op, a)) : cdp.evaluate(tab.id, editorScript(op, a))).then((x) => x.value);
+    const scopes = [{ session: null, frame: '', list: await evalIn(null, 'list', {}).catch((e) => fail(e.message)) }];
+    for (const f of await cdp.frameSessions(tab.id).catch(() => [])) {
+      if (isRestrictedUrl(f.url) || isBlockedCategory((await classifyUrl(f.url).catch(() => ({}))).category)) continue; // never into a blocked site's frame
+      const list = await evalIn(f.sessionId, 'list', {}).catch(() => null);
+      let host = f.url;
+      try { host = new URL(f.url).host; } catch { /* keep */ }
+      if (list?.length) scopes.push({ session: f.sessionId, frame: host, list });
+    }
     let r;
-    try { r = (await cdp.evaluate(tab.id, editorScript(act, args))).value; } catch (e) { fail(e.message); }
     if (act === 'list') {
-      if (!r?.length) return ok(text('No code editor found on this page. If the editor is inside an iframe, open the iframe\'s page in a tab; otherwise click into the editor and take a screenshot.'));
+      r = [];
+      for (const sc of scopes) for (const e of sc.list) r.push({ ...e, editor: r.length, frame: sc.session ? `${sc.frame} (cross-site)` : e.frame });
+    } else {
+      let k = Number(args.editor ?? 0);
+      const sc = scopes.find((x) => { if (k < x.list.length) return true; k -= x.list.length; return false; });
+      if (!sc) fail(`There is no editor ${args.editor ?? 0}; call "list" to see the editors.`);
+      try { r = await evalIn(sc.session, act, { ...args, editor: k }); } catch (e) { fail(e.message); }
+      if (r?.needsPaste && sc.session) fail('This editor is inside a cross-site frame and exposes no editor API: click into it and type, or open the frame\'s page in its own tab.');
+    }
+    if (act === 'list') {
+      if (!r?.length) return ok(text('No code editor found on this page or its frames. Click into the editor and take a screenshot to work with it directly.'));
       return ok(text(r.map((e) => `editor ${e.editor}: ${e.kind}${e.language ? ` · ${e.language}` : ''}${e.path ? ` · ${e.path}` : ''}${e.frame ? ` · in frame ${e.frame}` : ''} · ${e.lines} lines${e.writable ? '' : ' · written by paste'}${e.visibleOnly ? ' · reads only the visible lines' : ''}`).join('\n')));
     }
     if (act === 'read') return ok(text(`${r.kind}: lines ${r.from}-${r.to} of ${r.total}${r.visibleOnly ? ' (only the lines on screen; scroll to read more)' : ''}\n${r.text}`));

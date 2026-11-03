@@ -1,0 +1,6 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Cross-site editor</title></head>
+<body>
+  <div class="CodeMirror" id="e" style="width:300px;height:60px"></div>
+  <script>(() => { let v = 'SELECT 0;'; document.getElementById('e').CodeMirror = { getValue: () => v, setValue: (t) => { v = t; }, getOption: () => 'sql' }; })();</script>
+</body></html>

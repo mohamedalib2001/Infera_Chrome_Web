@@ -4,6 +4,7 @@
 import { t, setLanguage, applyI18n, MODE_LABEL, currentLang } from '../lib/i18n.js';
 import { renderMarkdown } from '../lib/markdown.js';
 import { icon } from '../lib/icons.js';
+import { readXlsx, rowsToObjects } from '../lib/xlsx-read.js';
 
 const $ = (s) => document.querySelector(s);
 const el = (tag, attrs = {}, ...kids) => {
@@ -1110,10 +1111,11 @@ function parseCsv(src) {
 function pickRows(sc) {
   const vars = (sc.params || []).map((p) => p.name).join(', ') || '—';
   const fast = el('input', { type: 'checkbox', checked: sc.recorded?.length ? true : undefined, disabled: sc.recorded?.length ? undefined : true });
-  const file = el('input', { type: 'file', accept: '.csv,.tsv,text/csv,text/tab-separated-values', id: 'batchFile', onchange: async (e) => {
+  const file = el('input', { type: 'file', accept: '.xlsx,.csv,.tsv,text/csv,text/tab-separated-values,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', id: 'batchFile', onchange: async (e) => {
     const f = e.target.files[0];
     if (!f) return;
-    const rows = parseCsv(await f.text());
+    let rows;
+    try { rows = /\.xlsx$/i.test(f.name) ? rowsToObjects(await readXlsx(await f.arrayBuffer())) : parseCsv(await f.text()); } catch (x) { alert(x.message); return; }
     if (!rows.length) { alert(t('noRows')); return; }
     closeViews();
     try { await call('run_batch', { id: sc.id, rows, fast: fast.checked }); } catch (x) { addBanner(x.message); }

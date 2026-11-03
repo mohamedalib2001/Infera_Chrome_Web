@@ -16,6 +16,8 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 const extPath = process.env.EXT_PATH || path.join(root, '..', 'extension');
 const html = fs.readFileSync(path.join(root, 'fixtures', 'test.html'));
 const editorsHtml = fs.readFileSync(path.join(root, 'fixtures', 'editors.html'));
+const frameEditorHtml = fs.readFileSync(path.join(root, 'fixtures', 'frame-editor.html'));
+const rowsXlsx = fs.readFileSync(path.join(root, 'fixtures', 'rows.xlsx'));
 const outDir = process.env.OUT_DIR || os.tmpdir();
 
 const requests = [];
@@ -355,6 +357,8 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
+  if (req.url.startsWith('/rows.xlsx')) { res.writeHead(200, { 'content-type': 'application/octet-stream', 'access-control-allow-origin': '*' }); return res.end(rowsXlsx); }
+  if (req.url.startsWith('/frame-editor.html')) { res.writeHead(200, { 'content-type': 'text/html' }); return res.end(frameEditorHtml); }
   if (req.url.startsWith('/editors.html')) { res.writeHead(200, { 'content-type': 'text/html', 'x-frame-options': 'DENY' }); return res.end(editorsHtml); }
   res.writeHead(200, { 'content-type': 'text/html', 'x-powered-by': 'Express' });
   res.end(html);
@@ -765,6 +769,8 @@ const dev = await sw.evaluate(async ({ base }) => {
   out.after = await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: () => ({ cm5: document.getElementById('cm5').CodeMirror.getValue(), ace: document.getElementById('ace').env.editor.getValue(), cm6: document.querySelector('#cm6 .cm-content').cmView.rootView.view.state.doc.toString(), ta: document.getElementById('code').value }) }).then((r) => r[0].result);
   out.ta = await T('code_editor', { action: 'write', editor: 4, text: 'SELECT 2;' });
   out.frame = await T('code_editor', { action: 'write', editor: 5, text: 'x = 2' });
+  out.xsite = await T('code_editor', { action: 'write', editor: 6, text: 'SELECT 42;' });
+  out.xsiteRead = await T('code_editor', { action: 'read', editor: 6 });
   out.frameAfter = await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: () => document.querySelector('iframe').contentWindow.document.getElementById('e').CodeMirror.getValue() }).then((r) => r[0].result);
   out.taAfter = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => document.getElementById('code').value }).then((r) => r[0].result);
   out.perf = await T('devtools', { action: 'performance' });
@@ -782,6 +788,7 @@ const dev = await sw.evaluate(async ({ base }) => {
 check('code editor: finds Monaco, CodeMirror 5 and 6, Ace and a text area', /editor 0: monaco · javascript · \/src\/math\.js/.test(dev.list.text) && /codemirror5 · python/.test(dev.list.text) && /ace · css/.test(dev.list.text) && /codemirror6/.test(dev.list.text) && /textarea/.test(dev.list.text), dev.list.text);
 check('code editor: reads numbered lines and fixes a bug in Monaco, verified', /2\|   return a - b;/.test(dev.read.text) && /verified/.test(dev.fix.text) && dev.monaco.includes('return a + b;'), JSON.stringify({ r: dev.read.text.slice(0, 120), f: dev.fix.text, m: dev.monaco }));
 check('code editor: write, insert and replace in CodeMirror 5, Ace and CodeMirror 6', dev.after.cm5 === 'print("hi")\nprint("there")' && dev.after.ace === '/* theme */\nbody { color: red; }' && dev.after.cm6 === 'SELECT id, name FROM users;', JSON.stringify(dev.after));
+check('code editor: reaches an editor in a cross-site frame (its own process)', /editor 6: codemirror5 · sql · in frame localhost:\d+ \(cross-site\)/.test(dev.list.text) && /verified/.test(dev.xsite.text) && /SELECT 42;/.test(dev.xsiteRead.text), `${dev.list.text} | ${dev.xsite.text} | ${dev.xsiteRead.text}`);
 check('code editor: reaches an editor inside a same-origin frame', /editor 5: codemirror5 · python · in frame inner/.test(dev.list.text) && /verified/.test(dev.frame.text) && dev.frameAfter === 'x = 2', `${dev.list.text} | ${dev.frame.text} | ${dev.frameAfter}`);
 check('code editor: a missing snippet is refused with a reason; a text area is written', dev.ambiguous.err && /not found/.test(dev.ambiguous.text) && dev.taAfter === 'SELECT 2;', `${dev.ambiguous.text} | ${dev.taAfter}`);
 check('devtools: performance, audit and inspect', /"ttfb"/.test(dev.perf.text) && /"resources"/.test(dev.perf.text) && /No meta description/.test(dev.audit.text) && /"matches": 1/.test(dev.inspect.text) && /"tag": "textarea"/.test(dev.inspect.text), dev.audit.text.slice(0, 200));
@@ -848,6 +855,17 @@ await sp.waitForTimeout(800);
 await sp.locator('#btnNew').click();
 await sp.waitForTimeout(400);
 await sp.screenshot({ path: path.join(outDir, 'sidepanel-empty.png') });
+// Excel input for batch runs: a deflated workbook with shared, rich and inline strings, numbers,
+// booleans, a gap, and a sheet that is not sheet1; and a workbook from the extension's own writer.
+const xl = await sp.evaluate(async ({ base }) => {
+  const { readXlsx, rowsToObjects } = await import('../lib/xlsx-read.js');
+  const rows = rowsToObjects(await readXlsx(await (await fetch(`${base}/rows.xlsx`)).arrayBuffer()));
+  return { rows };
+}, { base });
+const own = await sw.evaluate(async () => (await self.__infera.buildFile({ format: 'xlsx', filename: 't', rows: [['city', 'n'], ['Riyadh', 3]] })).base64);
+const ownRows = await sp.evaluate(async (b64) => { const { readXlsx } = await import('../lib/xlsx-read.js'); return readXlsx(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer); }, own);
+check('excel input: reads a real workbook (deflate, shared/rich/inline strings, booleans, gaps, any sheet)', JSON.stringify(xl.rows) === JSON.stringify([{ name: 'Omar Ali', national_id: '1012345678', paid: 'TRUE' }, { name: 'سارة', national_id: '', paid: 'FALSE' }]), JSON.stringify(xl.rows));
+check('excel input: reads the extension\'s own Excel export', JSON.stringify(ownRows) === JSON.stringify([['city', 'n'], ['Riyadh', '3']]), JSON.stringify(ownRows));
 check('home: quick actions and quick tasks', (await sp.locator('#examples .qa').count()) === 9 && (await sp.locator('#quickTasks .qt').count()) === 6);
 await sp.locator('#examples .qa[data-qa="extract"]').click();
 check('home: a quick action prefills the request', /table|الجدول/.test(await sp.locator('#input').inputValue()));

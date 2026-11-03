@@ -27,7 +27,7 @@ class CDPManager {
     chrome.debugger.onEvent.addListener((src, method, params) => this.#onEvent(src, method, params));
     chrome.debugger.onDetach.addListener((src, reason) => {
       const st = this.tabs.get(src.tabId);
-      if (st) st.attached = false;
+      if (st) { st.attached = false; st.autoAttached = false; st.frames?.clear(); }
       for (const fn of this.detachListeners) fn(src.tabId, reason);
     });
     chrome.tabs.onRemoved.addListener((tabId) => this.tabs.delete(tabId));
@@ -79,9 +79,39 @@ class CDPManager {
     return chrome.debugger.sendCommand({ tabId }, method, params);
   }
 
+  // Cross-site frames run in processes of their own: the page's debugger session cannot
+  // evaluate in them. Auto-attach gives each one a flat child session to address.
+  async frameSessions(tabId) {
+    if (!this.isAttached(tabId)) await this.attach(tabId);
+    const st = this.state(tabId);
+    st.frames ||= new Map();
+    if (!st.autoAttached) {
+      await chrome.debugger.sendCommand({ tabId }, 'Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+      st.autoAttached = true;
+      await new Promise((r) => setTimeout(r, 400)); // the attachedToTarget events arrive
+    }
+    return [...st.frames.values()].filter((f) => f.type === 'iframe');
+  }
+
+  async evaluateIn(tabId, sessionId, expression) {
+    const r = await chrome.debugger.sendCommand({ tabId, sessionId }, 'Runtime.evaluate', {
+      expression, replMode: true, awaitPromise: true, returnByValue: true, userGesture: true, timeout: 30_000,
+    });
+    if (r.exceptionDetails) {
+      const d = r.exceptionDetails;
+      throw new Error(d.exception?.description || d.text || 'JavaScript error');
+    }
+    return r.result;
+  }
+
   #onEvent(src, method, p) {
     const st = this.tabs.get(src.tabId);
     if (!st) return;
+    if (method === 'Target.attachedToTarget') {
+      (st.frames ||= new Map()).set(p.sessionId, { sessionId: p.sessionId, type: p.targetInfo?.type, url: p.targetInfo?.url || '', targetId: p.targetInfo?.targetId });
+      return;
+    }
+    if (method === 'Target.detachedFromTarget') { st.frames?.delete(p.sessionId); return; }
     switch (method) {
       case 'Runtime.consoleAPICalled':
         this.#pushConsole(st, {
