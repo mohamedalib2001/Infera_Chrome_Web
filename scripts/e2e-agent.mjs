@@ -849,8 +849,9 @@ const handover = await sw.evaluate(async ({ base }) => {
   live.subscribe((e) => { if (e.type === 'info') infos.push(e.message); });
   await I.panelCall(win, { type: 'replay_workflow', id: sc.id });
   for (let i = 0; i < 80 && live.status !== 'done'; i++) await new Promise((r) => setTimeout(r, 250));
-  return { status: live.status, infos, steps: live.steps.map((x) => x.status), first: JSON.stringify(live.messages[0]?.content || '').slice(0, 2000), s: !!s };
+  return { status: live.status, infos, notes: live.steps.map((x) => x.note).join('|'), steps: live.steps.map((x) => x.status), first: JSON.stringify(live.messages[0]?.content || '').slice(0, 2000), s: !!s };
 }, { base });
+check('fast replay: the agent\'s hard rules apply — a payment button is never clicked by a replay', /Making purchases or payments is not allowed/.test(handover.notes), handover.notes);
 check('fast replay: a step that cannot be done hands over to the agent from there', handover.status === 'done' && handover.steps.join() === 'done,failed' && /the agent continues from here/.test(handover.infos.join(' ')) && /did steps 1–1 of 2 and stopped at step 2/.test(handover.first) && requests.length >= 1, JSON.stringify({ ...handover, first: handover.first.slice(0, 300) }));
 phase = 'normal';
 

@@ -5,6 +5,7 @@
 import { cdp } from './cdp.js';
 import { waitForLoad, overlay } from './page.js';
 import { classifyUrl, isBlockedCategory, isRestrictedUrl } from './domain-safety.js';
+import { hardBlockReason, forcedConfirmation } from './safety.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const MAX_STEPS = 300;
@@ -29,7 +30,9 @@ function locateInPage(target, opts) {
   if (!el) return null;
   el.scrollIntoView({ block: 'center', inline: 'center' });
   const r = el.getBoundingClientRect();
-  const out = { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), tag: el.tagName.toLowerCase() };
+  const out = { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), tag: el.tagName.toLowerCase(),
+    // Password, card and one-time-code fields are never filled by a replay.
+    sensitive: el.type === 'password' || /cc-|one-time-code/i.test(el.autocomplete || '') || /card.?(num|no)|cvc|cvv|iban/i.test(`${el.name || ''} ${el.id || ''}`) };
   if (opts?.select !== undefined && el.tagName === 'SELECT') {
     const o = [...el.options].find((x) => norm(x.textContent) === norm(opts.select));
     if (!o) return { ...out, error: `The option "${opts.select}" is not in the list.` };
@@ -141,11 +144,19 @@ async function runStep(tabId, s, subst, first) {
     await cdp.pressCombo(tabId, String(s.value).replace(/^cmd\+/, 'meta+'));
     return '';
   }
+  // The same hard rules as the agent: no purchases, payments, transactions, permanent deletion or
+  // account creation, and no authorization grants without the person — the agent takes over and asks.
+  const t = { name: s.target?.name || '', role: s.target?.role || s.target?.tag || '', type: s.target?.type || '' };
+  const hard = ['click', 'key', 'toggle'].includes(s.action) ? hardBlockReason(t) : null;
+  if (hard) return hard;
+  const confirm = s.action === 'click' ? forcedConfirmation({ url: tab.url, target: t }) : null;
+  if (confirm) return confirm;
   const value = subst(s.value);
   if (s.action === 'type' && value === '<redacted>') return 'This step types a password or card number, which a replay never does. Enter it yourself.';
   const at = await find(tabId, s.target, s.action === 'select' ? { select: value } : s.action === 'toggle' ? { checked: true } : s.action === 'type' ? { clear: true } : {});
   if (!at) return `Could not find ${s.target?.name ? `"${s.target.name}"` : 'the element'} on the page.`;
   if (at.error) return at.error;
+  if (s.action === 'type' && at.sensitive) return 'This is a password, card or verification-code field, which a replay never fills. Enter it yourself.';
   if (s.action === 'click') await cdp.click(tabId, at.x, at.y);
   else if (s.action === 'toggle') { if (at.checked !== !!value) await cdp.click(tabId, at.x, at.y); }
   else if (s.action === 'type') {

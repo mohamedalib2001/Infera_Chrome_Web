@@ -239,7 +239,9 @@ async function securityInPage() {
   const add = (severity, check, message) => findings.push({ severity, check, message });
   let headers = {};
   try {
-    const r = await fetch(location.href, { method: 'GET', cache: 'no-store', credentials: 'same-origin' });
+    // HEAD first: it reads the headers without asking the server to do the page's work again.
+    let r = await fetch(location.href, { method: 'HEAD', cache: 'no-store', credentials: 'same-origin' });
+    if (r.status === 405 || r.status === 501) r = await fetch(location.href, { method: 'GET', cache: 'no-store', credentials: 'same-origin' });
     r.headers.forEach((v, k) => { headers[k] = v; });
   } catch (e) { add('info', 'headers', `Could not read the response headers (${e.message}).`); }
   const h = (k) => headers[k];

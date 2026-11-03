@@ -19,9 +19,23 @@ Infera Engine Ltd, London · 4 November 2026 · extension version 2.4.0
   headers, performance, research, two tabs, Arabic, Excel output, refusing a payment). Ground truth is
   fetched from the site or read from the page while it runs. See `docs/BENCHMARK.md`.
 
+## Security review of 2.2–2.4
+
+An adversarial pass over the new code found and fixed:
+
+* Fast replay (and batches and scheduled replays) clicked without per-step approval. It now applies
+  the agent's hard rules before every click or key: no purchases or payments, financial transactions,
+  permanent deletion or account creation, and no OAuth consent without the person; it never types into
+  password, card or one-time-code fields. Such a step stops the replay and the agent takes over (and
+  asks the person).
+* The passive security review re-requested the page with GET; it now reads the headers with HEAD and
+  falls back to GET only when the server refuses HEAD.
+* Site guides are written by the agent after visiting pages, so page content could shape them. They
+  are handed back labelled as the agent's own notes — hints about the site, not instructions.
+
 ## Verification
 
-* Agent end-to-end suite: **123 checks passed, 0 failed** (119 in 2.3). New: an editor in a
+* Agent end-to-end suite: **124 checks passed, 0 failed** (119 in 2.3). New: an editor in a
   cross-site frame (localhost inside 127.0.0.1) written and read back; a deflated Excel workbook with
   shared, rich and inline strings, booleans and gaps; the extension's own Excel export read back; a
   scheduled workflow run by fast replay with no model request.
