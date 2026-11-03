@@ -534,7 +534,9 @@ async function runScheduledTask(id) {
   const win = await chrome.windows.create({ url: task.startUrl || 'about:blank', focused: false });
   s.windowId = win.id;
   await tabGroups.adoptTab(s.id, win.tabs[0].id, 'scheduled');
-  await s.run(task.prompt, { startTabId: win.tabs[0].id }).catch(() => {});
+  const sc = task.shortcutId ? (await listShortcuts()).find((x) => x.id === task.shortcutId) : null;
+  if (sc?.recorded?.length) await replayInSession(s, sc, win.tabs[0].id).catch(() => {});
+  else await s.run(task.prompt, { startTabId: win.tabs[0].id }).catch(() => {});
   await markRun(id, s.status);
 }
 

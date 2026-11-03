@@ -825,9 +825,17 @@ const fastRun = await sw.evaluate(async ({ base }) => {
   for (let i = 0; i < 100; i++) { b = await I.panelCall(win, { type: 'batch_state' }); if (b && !b.running) break; await new Promise((r) => setTimeout(r, 200)); }
   const out2 = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => document.getElementById('out').textContent }).then((r) => r[0].result);
   const notes = s.steps.map((x) => x.note).filter(Boolean).join(' | ');
-  return { status: s.status, steps: steps.at(-1), notes, out, pw, batch: b && { total: b.total, statuses: b.results.map((r) => r.status), running: b.running }, out2 };
+  // Scheduled from the studio: the task runs by fast replay too (no model request).
+  const before = (await chrome.storage.local.get('settings')).settings;
+  const task = await I.panelCall(win, { type: 'save_task', task: { name: 'order daily', prompt: sc.prompt, frequency: 'daily', time: '09:00', shortcutId: sc.id } });
+  await I.panelCall(win, { type: 'run_task_now', id: task.id });
+  let sched = null;
+  for (let i = 0; i < 60; i++) { sched = (await I.panelCall(win, { type: 'list_tasks' })).find((x) => x.id === task.id); if (sched?.lastStatus) break; await new Promise((r) => setTimeout(r, 250)); }
+  await I.panelCall(win, { type: 'delete_task', id: task.id });
+  return { sched: { shortcutId: task.shortcutId, lastStatus: sched?.lastStatus }, before: !!before, status: s.status, steps: steps.at(-1), notes, out, pw, batch: b && { total: b.total, statuses: b.results.map((r) => r.status), running: b.running }, out2 };
 }, { base });
 check('fast replay: the recorded steps run without the model, with new values, shown as the live plan', fastRun.status === 'done' && fastRun.out === 'submitted:Layla:b:true' && fastRun.steps === 'ddddd' && requests.length === 0, JSON.stringify({ ...fastRun, pw: undefined, n: requests.length }));
+check('scheduled workflow: runs by fast replay, without the model', fastRun.sched.shortcutId && fastRun.sched.lastStatus === 'done' && requests.length === 0, JSON.stringify(fastRun.sched) + ` n=${requests.length}`);
 check('batch: one run per row, results kept', fastRun.batch?.total === 2 && fastRun.batch.statuses.join() === 'done,done' && fastRun.out2 === 'submitted:Sara:b:true', JSON.stringify(fastRun.batch) + fastRun.out2);
 check('playwright export: a runnable test from the recorded steps', /page\.goto\(".*test\.html\?replay"\)/.test(fastRun.pw.code) && /getByRole\("textbox", \{ name: "Full name" \}\)\.fill\("Mona"\)/.test(fastRun.pw.code) && /selectOption\(\{ label: "Blue" \}\)/.test(fastRun.pw.code) && /setChecked\(true\)/.test(fastRun.pw.code) && fastRun.pw.filename === 'order-form.spec.js', fastRun.pw.code.slice(0, 400));
 phase = 'plain';

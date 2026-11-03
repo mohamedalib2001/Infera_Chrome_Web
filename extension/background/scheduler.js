@@ -79,6 +79,8 @@ export async function saveTask(t) {
     dayOfMonth: t.dayOfMonth ?? 1,
     month: t.month ?? 0,
     model: t.model || '',
+    // A recorded workflow scheduled from the studio: runs by fast replay, the agent only on a failed step.
+    shortcutId: t.shortcutId || '',
     enabled: t.enabled !== false,
     lastRun: t.lastRun || null,
     lastStatus: t.lastStatus || null,

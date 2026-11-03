@@ -1056,7 +1056,7 @@ async function savedTab() {
       el('button', { class: 'btn small', onclick: () => pickRows(s) }, ic('table'), t('runRows')),
       s.recorded?.length ? el('button', { class: 'btn small', onclick: async () => { const r = await call('playwright_export', { id: s.id }); download(r.filename, r.code, 'text/javascript'); } }, ic('download'), t('playwright')) : null,
       el('button', { class: 'btn small', onclick: () => openEditor(s) }, ic('edit'), t('edit')),
-      el('button', { class: 'btn small', onclick: () => showTaskForm({ name: s.command, prompt: s.prompt, startUrl: s.startUrl }) }, ic('calendar'), t('schedule')),
+      el('button', { class: 'btn small', onclick: () => showTaskForm({ name: s.command, prompt: s.prompt, startUrl: s.startUrl, shortcutId: s.id }) }, ic('calendar'), t('schedule')),
       el('button', { class: 'btn small', onclick: () => exportWorkflows([s]) }, ic('download'), t('wfExport')),
       el('button', { class: 'btn small danger', onclick: async () => { await call('delete_shortcut', { id: s.id }); openStudio('saved'); } }, ic('trash'), t('delete')))));
   return [

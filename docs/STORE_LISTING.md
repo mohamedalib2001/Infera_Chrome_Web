@@ -31,6 +31,7 @@ What you can do
 • Fast replay of recorded workflows without AI, one run per row of a CSV file, and export as a Playwright test
 • Learns each site: after a task it saves a short guide to that website and uses it next time
 • Checks its own work: it does not report a task as done while planned steps are unverified
+• Runs a workflow for every row of an Excel or CSV file, and runs recorded workflows on a schedule without AI cost
 
 Your INFERA Agent account
 Sign in with your inferaagent.com account (password, Google or SSO). No API keys: usage is paid from your INFERA Agent credits, and the model key never reaches your browser.

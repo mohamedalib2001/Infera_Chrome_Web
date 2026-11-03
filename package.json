@@ -1,6 +1,6 @@
 {
   "name": "infera-chrome-web",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "private": true,
   "type": "module",
   "description": "Infera Agent \u2014 browser agent extension for Chrome with a native/MCP bridge and cloud relay",
@@ -10,7 +10,8 @@
     "test": "node scripts/check.mjs && node native-host/test/bridge.test.js && node native-host/test/desktop.test.js && node bridge-relay/test/relay.test.js",
     "build:store": "node scripts/build-store.mjs",
     "test:e2e": "node scripts/e2e.mjs && node scripts/e2e-agent.mjs",
-    "perf": "node scripts/perf.mjs"
+    "perf": "node scripts/perf.mjs",
+    "bench": "node scripts/bench.mjs"
   },
   "devDependencies": {
     "playwright": "^1.55.0"
