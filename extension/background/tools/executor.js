@@ -23,6 +23,7 @@ import { buildFile } from './files.js';
 import { editorScript, pasteScript, devScripts, toHar } from './dev-tools.js';
 import { nativeBridge } from '../native-bridge.js';
 import { saveMemory, searchMemory, forgetMemory } from '../memory.js';
+import { saveSiteGuide, siteGuides } from '../site-guides.js';
 import { TOOL_BY_NAME } from './definitions.js';
 import {
   PERMISSION_TYPES as P, PERMISSION_MODES, HELPER_MODEL, SCREENSHOT_TTL_MS, FIND_MAX_RESULTS, LOG_DEFAULT_LIMIT,
@@ -693,7 +694,7 @@ const impl = {
     try { r = (await cdp.evaluate(tab.id, editorScript(act, args))).value; } catch (e) { fail(e.message); }
     if (act === 'list') {
       if (!r?.length) return ok(text('No code editor found on this page. If the editor is inside an iframe, open the iframe\'s page in a tab; otherwise click into the editor and take a screenshot.'));
-      return ok(text(r.map((e) => `editor ${e.editor}: ${e.kind}${e.language ? ` · ${e.language}` : ''}${e.path ? ` · ${e.path}` : ''} · ${e.lines} lines${e.writable ? '' : ' · written by paste'}${e.visibleOnly ? ' · reads only the visible lines' : ''}`).join('\n')));
+      return ok(text(r.map((e) => `editor ${e.editor}: ${e.kind}${e.language ? ` · ${e.language}` : ''}${e.path ? ` · ${e.path}` : ''}${e.frame ? ` · in frame ${e.frame}` : ''} · ${e.lines} lines${e.writable ? '' : ' · written by paste'}${e.visibleOnly ? ' · reads only the visible lines' : ''}`).join('\n')));
     }
     if (act === 'read') return ok(text(`${r.kind}: lines ${r.from}-${r.to} of ${r.total}${r.visibleOnly ? ' (only the lines on screen; scroll to read more)' : ''}\n${r.text}`));
     if (r?.needsPaste) {
@@ -812,6 +813,18 @@ const impl = {
       default:
         return fail(`Unknown all_tabs action "${input.action}".`);
     }
+  },
+
+  async site_guide(ctx, input) {
+    if (!ctx.memoryEnabled) fail('Memory is turned off in Settings.');
+    if (input.action === 'read') {
+      const h = String(input.host || '').replace(/^https?:\/\//, '').replace(/[/:?#].*$/, '').replace(/^www\./, '').toLowerCase();
+      const g = (await siteGuides([h])).get(h);
+      return ok(text(g ? `Guide for ${h}: ${g.text}` : `No guide saved for ${h} yet.`));
+    }
+    if (input.action !== 'save') fail('action must be save or read.');
+    const r = await saveSiteGuide(input.host, input.text);
+    return ok(text(`${r.replaced ? 'Updated' : 'Saved'} the guide for ${r.host}. It will be given to you the next time you open this site.`));
   },
 
   async memory_save(ctx, input) {

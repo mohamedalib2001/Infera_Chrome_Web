@@ -314,6 +314,7 @@ const TOOL_ICON = {
   web_search: '🔎', web_fetch: '↓', code_execution: '⚙', bash_code_execution: '⚙', text_editor_code_execution: '⚙',
   memory_save: '★', memory_forget: '☆', memory_search: '⌕', task_notes: '✎', task_steps: '☰', all_tabs: '▦',
   export_file: '⤓', skill_save: '⚡', delegate_tasks: '⫶', advisor: '✦', advisor_tool_result: '✦', desktop_task: '🖥',
+  site_guide: '🧭', code_editor: '</>', devtools: '⚙',
 };
 
 function targetText(tg) {
@@ -359,6 +360,9 @@ function toolSummary(name, i = {}) {
     case 'skill_save': return `/${String(i.command || '').replace(/^\//, '')}${i.schedule?.frequency ? ` · ${i.schedule.frequency}` : ''}`;
     case 'delegate_tasks': return `${i.tasks?.length || 0} helpers`;
     case 'desktop_task': return String(i.task || '').slice(0, 60);
+    case 'site_guide': return `${i.action} ${i.host || ''}`;
+    case 'code_editor': return `${i.action}${i.editor ? ` #${i.editor}` : ''}`;
+    case 'devtools': return `${i.action}${i.selector ? ` ${i.selector}` : ''}`;
     case 'all_tabs': return `${i.action}${i.match ? ` “${i.match}”` : i.duplicates ? ' duplicates' : i.tab_ids?.length ? ` ${i.tab_ids.length} tab(s)` : ''}`;
     default: return '';
   }

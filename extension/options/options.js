@@ -172,7 +172,7 @@ async function render() {
   // Long-term memory
   const memories = await send('list_memory');
   const memRow = (m) => el('tr', {},
-    el('td', {}, m.pinned ? el('span', { title: tr('pinned') }, '★ ') : null, m.text, m.topic ? el('span', { class: 'muted' }, ` · ${m.topic}`) : null, m.source === 'app' ? el('span', { class: 'muted' }, ` · ${tr('fromApp')}`) : null),
+    el('td', {}, m.pinned ? el('span', { title: tr('pinned') }, '★ ') : null, String(m.topic || '').startsWith('site:') ? el('b', {}, `🧭 ${m.topic.slice(5)}: `) : null, m.text, m.topic && !String(m.topic).startsWith('site:') ? el('span', { class: 'muted' }, ` · ${m.topic}`) : null, m.source === 'app' ? el('span', { class: 'muted' }, ` · ${tr('fromApp')}`) : null),
     el('td', { class: 'muted', style: 'white-space:nowrap' }, new Date(m.updatedAt || m.createdAt).toLocaleDateString()),
     el('td', {}, el('button', { class: 'btn', onclick: async () => { await send('forget_memory', { id: m.id }); render(); } }, tr('remove'))));
   const memBody = el('tbody', {}, ...memories.slice(0, 200).map(memRow));

@@ -9,6 +9,7 @@
   <div class="ace_editor" id="ace" style="width:400px;height:80px"></div>
   <div class="cm-editor" id="cm6" style="width:400px;height:80px"><div class="cm-content" contenteditable="true"></div></div>
   <textarea id="code" rows="8" cols="60">SELECT 1;</textarea>
+  <iframe name="inner" style="width:420px;height:120px" srcdoc="<div class='CodeMirror' id='e' style='width:300px;height:60px'></div><script>(() => { let v = 'x = 1'; document.getElementById('e').CodeMirror = { getValue: () => v, setValue: (t) => { v = t; }, getOption: () => 'python' }; })();</script>"></iframe>
   <script>
     // Monaco: monaco.editor.getEditors() → editor with getModel(), executeEdits()
     (() => {

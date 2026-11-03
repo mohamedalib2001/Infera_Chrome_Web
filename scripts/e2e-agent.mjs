@@ -413,7 +413,7 @@ check('long history: summarized on the server at 250k tokens (compaction), outpu
 check('task named for the cost log', decodeURIComponent(requests[0].headers['x-infera-task'] || '') === 'What is on this page?');
 const t0 = requests[0].body.tools;
 check('tools: web search/fetch first, own tools w/ eager streaming, memory, cache_control',
-  t0.length === 36 && t0.some((t) => t.name === 'code_editor') && t0.some((t) => t.name === 'devtools') && t0.some((t) => t.name === 'task_steps') && t0.some((t) => t.name === 'export_file') && t0.some((t) => t.name === 'delegate_tasks') && t0.some((t) => t.name === 'task_notes') && t0.some((t) => t.name === 'memory_search') && t0[0].type === 'web_search_20260318' && t0[0].response_inclusion === 'excluded' && t0[1].type === 'web_fetch_20260318'
+  t0.length === 37 && t0.some((t) => t.name === 'site_guide') && t0.some((t) => t.name === 'code_editor') && t0.some((t) => t.name === 'devtools') && t0.some((t) => t.name === 'task_steps') && t0.some((t) => t.name === 'export_file') && t0.some((t) => t.name === 'delegate_tasks') && t0.some((t) => t.name === 'task_notes') && t0.some((t) => t.name === 'memory_search') && t0[0].type === 'web_search_20260318' && t0[0].response_inclusion === 'excluded' && t0[1].type === 'web_fetch_20260318'
   && !t0[0].eager_input_streaming && t0[2].eager_input_streaming === true && t0.some((t) => t.name === 'memory_save') && t0.some((t) => t.name === 'all_tabs') && !!t0.at(-1).cache_control,
   t0.map((t) => t.name || t.type).join(','));
 check('tab context in first user msg', JSON.stringify(requests[0].body.messages[0]).includes('<tab_context>'));
@@ -636,7 +636,8 @@ check('new installs start on the Auto operating mode', installMode === 'auto', S
 check('take over: holds the next step while the user works', steps.held.status === 'paused' && steps.held.turns === 1 && steps.statuses.includes('paused') && steps.resumed, JSON.stringify({ held: steps.held, n: requests.length, st: steps.statuses }));
 check('take over: the browser action planned before it is not run; the model is told to look again',
   /Not run: the user took over the browser/.test(sReq[1] || '') && /took over the browser for a while and has now given control back/.test(sReq[1] || ''), (sReq[1] || '').slice(0, 400));
-check('steps: task completes after resume', steps.status === 'done' && requests.length === 3, `${steps.status} ${requests.length}`);
+check('steps: task completes after resume', steps.status === 'done' && requests.length === 4, `${steps.status} ${requests.length}`);
+check('self-check: answering with unverified steps sends the agent back once to finish or explain them', /Before you finish: your plan still has 3 step\(s\) not marked done/.test(JSON.stringify(requests[3]?.body.messages.at(-1) || '')), JSON.stringify(requests[3]?.body.messages.at(-1) || '').slice(0, 200));
 check('prompt: verify before done, never submit twice', /Verify, don't assume/.test(JSON.stringify(requests[0].body.system)) && /Never submit the same form or request twice/.test(JSON.stringify(requests[0].body.system)));
 
 // Operating modes: Auto picks the model and effort from the request; Power and Fast are fixed; a busy
@@ -717,6 +718,31 @@ await sw.evaluate(async () => {
   await chrome.storage.local.set({ auth: { kind: 'infera', server: cur.inferaUrl, accessToken: 'inf_test', clientId: 'c1' } });
 });
 
+// Site guides: saved in the account memory per site, handed to the agent when it opens that
+// site (and kept out of the general memory block), replaced when saved again, never secrets.
+requests.length = 0;
+phase = 'plain';
+const guide = await sw.evaluate(async ({ tabId }) => {
+  const I = self.__infera;
+  const s0 = new I.AgentSession({ kind: 'panel' });
+  const ctx = { sessionId: s0.id, kind: 'panel', mode: 'skip_all_permission_checks', memoryEnabled: true, requestApproval: async () => 'once', signal: new AbortController().signal, toolUseId: 'g' };
+  const T = (input) => I.executeTool('site_guide', input, ctx).then((r) => ({ text: r.content.map((c) => c.text || '').join(''), err: !!r.isError }));
+  const first = await T({ action: 'save', host: 'https://www.127.0.0.1/x', text: 'Order form is on /test.html; fill Full name then choose a colour; Submit order is at the bottom' });
+  const second = await T({ action: 'save', host: '127.0.0.1', text: 'Order form is on /test.html; Full name, colour, tick I agree; Submit order at the bottom; the result shows under the form' });
+  const secret = await T({ action: 'save', host: '127.0.0.1', text: 'Sign in with password: hunter2 then open the form page' });
+  const read = await T({ action: 'read', host: '127.0.0.1' });
+  const s = new I.AgentSession({ kind: 'panel' });
+  s.classicTools = true;
+  s.modelOverride = 'claude-opus-5-5';
+  await s.run('What is on this page?', { startTabId: tabId });
+  const guides = (await chrome.storage.local.get('userMemory')).userMemory.filter((m) => m.topic === 'site:127.0.0.1').length;
+  return { first, second, secret, read, guides };
+}, { tabId });
+const g0 = JSON.stringify(requests[0]?.body.messages[0] || '');
+check('site guide: saved per site, a newer one replaces it, secrets refused', /Saved the guide for 127\.0\.0\.1/.test(guide.first.text) && /Updated the guide/.test(guide.second.text) && guide.secret.err && guide.guides === 1 && /tick I agree/.test(guide.read.text), JSON.stringify(guide));
+check('site guide: handed to the agent when it opens the site, not in the general memory', /<site_guide host=.{1,2}127\.0\.0\.1/.test(g0) && /tick I agree/.test(g0) && !/user_memory[^<]*tick I agree/.test(g0), g0.slice(0, 300));
+phase = 'normal';
+
 // Developer tools: code editors read and written through their own APIs, page diagnostics,
 // a passive security review, and a network log file.
 const dev = await sw.evaluate(async ({ base }) => {
@@ -738,6 +764,8 @@ const dev = await sw.evaluate(async ({ base }) => {
   out.cm6 = await T('code_editor', { action: 'replace', editor: 1, find: '*', replace_with: 'id, name' });
   out.after = await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: () => ({ cm5: document.getElementById('cm5').CodeMirror.getValue(), ace: document.getElementById('ace').env.editor.getValue(), cm6: document.querySelector('#cm6 .cm-content').cmView.rootView.view.state.doc.toString(), ta: document.getElementById('code').value }) }).then((r) => r[0].result);
   out.ta = await T('code_editor', { action: 'write', editor: 4, text: 'SELECT 2;' });
+  out.frame = await T('code_editor', { action: 'write', editor: 5, text: 'x = 2' });
+  out.frameAfter = await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: () => document.querySelector('iframe').contentWindow.document.getElementById('e').CodeMirror.getValue() }).then((r) => r[0].result);
   out.taAfter = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => document.getElementById('code').value }).then((r) => r[0].result);
   out.perf = await T('devtools', { action: 'performance' });
   out.audit = await T('devtools', { action: 'audit' });
@@ -754,6 +782,7 @@ const dev = await sw.evaluate(async ({ base }) => {
 check('code editor: finds Monaco, CodeMirror 5 and 6, Ace and a text area', /editor 0: monaco · javascript · \/src\/math\.js/.test(dev.list.text) && /codemirror5 · python/.test(dev.list.text) && /ace · css/.test(dev.list.text) && /codemirror6/.test(dev.list.text) && /textarea/.test(dev.list.text), dev.list.text);
 check('code editor: reads numbered lines and fixes a bug in Monaco, verified', /2\|   return a - b;/.test(dev.read.text) && /verified/.test(dev.fix.text) && dev.monaco.includes('return a + b;'), JSON.stringify({ r: dev.read.text.slice(0, 120), f: dev.fix.text, m: dev.monaco }));
 check('code editor: write, insert and replace in CodeMirror 5, Ace and CodeMirror 6', dev.after.cm5 === 'print("hi")\nprint("there")' && dev.after.ace === '/* theme */\nbody { color: red; }' && dev.after.cm6 === 'SELECT id, name FROM users;', JSON.stringify(dev.after));
+check('code editor: reaches an editor inside a same-origin frame', /editor 5: codemirror5 · python · in frame inner/.test(dev.list.text) && /verified/.test(dev.frame.text) && dev.frameAfter === 'x = 2', `${dev.list.text} | ${dev.frame.text} | ${dev.frameAfter}`);
 check('code editor: a missing snippet is refused with a reason; a text area is written', dev.ambiguous.err && /not found/.test(dev.ambiguous.text) && dev.taAfter === 'SELECT 2;', `${dev.ambiguous.text} | ${dev.taAfter}`);
 check('devtools: performance, audit and inspect', /"ttfb"/.test(dev.perf.text) && /"resources"/.test(dev.perf.text) && /No meta description/.test(dev.audit.text) && /"matches": 1/.test(dev.inspect.text) && /"tag": "textarea"/.test(dev.inspect.text), dev.audit.text.slice(0, 200));
 check('devtools: passive security review reads headers and flags what is missing', /"x-frame-options": "DENY"/.test(dev.security.text) && /not served over HTTPS/.test(dev.security.text) && /Content-Security-Policy/.test(dev.security.text) && !/clickjacking/.test(dev.security.text), dev.security.text.slice(0, 300));

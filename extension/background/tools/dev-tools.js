@@ -11,62 +11,76 @@
 function editorsInPage(op, arg) {
   const list = [];
   const has = (el) => list.some((x) => x.el && (x.el === el || x.el.contains(el) || el.contains(x.el)));
-  const mon = window.monaco?.editor;
-  if (mon?.getEditors) {
-    for (const ed of mon.getEditors()) {
-      const m = ed.getModel?.();
-      if (!m) continue;
+  // Editors in this page and in its same-origin frames (Apps Script, notebooks and admin
+  // panels often put the editor in an iframe); a cross-origin frame cannot be reached here.
+  const scan = (win, frame, off) => {
+    const first = list.length;
+    const mon = win.monaco?.editor;
+    if (mon?.getEditors) {
+      for (const ed of mon.getEditors()) {
+        const m = ed.getModel?.();
+        if (!m) continue;
+        list.push({
+          kind: 'monaco', el: ed.getDomNode?.(), lang: m.getLanguageId?.() || '', path: m.uri?.path || '',
+          get: () => m.getValue(),
+          set: (t) => { ed.pushUndoStop?.(); ed.executeEdits('infera', [{ range: m.getFullModelRange(), text: t }]); ed.pushUndoStop?.(); },
+        });
+      }
+    }
+    for (const el of win.document.querySelectorAll('.cm-content')) {
+      const cv = el.cmView;
+      const v = cv?.rootView?.view || cv?.view || el.cmTile?.view;
+      if (!v?.state?.doc || has(el)) continue;
+      list.push({ kind: 'codemirror6', el: v.dom || el, lang: '', path: '', get: () => v.state.doc.toString(), set: (t) => v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: t } }) });
+    }
+    for (const el of win.document.querySelectorAll('.CodeMirror')) {
+      const c = el.CodeMirror;
+      if (!c || has(el)) continue;
+      const mode = c.getOption?.('mode');
+      list.push({ kind: 'codemirror5', el, lang: typeof mode === 'string' ? mode : mode?.name || '', path: '', get: () => c.getValue(), set: (t) => c.setValue(t) });
+    }
+    for (const el of win.document.querySelectorAll('.ace_editor')) {
+      const a = el.env?.editor;
+      if (!a || has(el)) continue;
+      list.push({ kind: 'ace', el, lang: String(a.session?.getMode?.()?.$id || '').replace('ace/mode/', ''), path: '', get: () => a.getValue(), set: (t) => { a.session.setValue(t); } });
+    }
+    // Monaco without a reachable API (vscode.dev, github.dev): found by its DOM, written by paste.
+    for (const el of win.document.querySelectorAll('.monaco-editor')) {
+      if (has(el) || !el.offsetParent) continue;
+      const ta = el.querySelector('textarea');
       list.push({
-        kind: 'monaco', el: ed.getDomNode?.(), lang: m.getLanguageId?.() || '', path: m.uri?.path || '',
-        get: () => m.getValue(),
-        set: (t) => { ed.pushUndoStop?.(); ed.executeEdits('infera', [{ range: m.getFullModelRange(), text: t }]); ed.pushUndoStop?.(); },
+        kind: 'monaco-dom', el, lang: el.getAttribute('data-mode-id') || '', path: '', api: false,
+        get: () => [...el.querySelectorAll('.view-line')].sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top)).map((l) => l.textContent.replace(/ /g, ' ')).join('\n'),
+        set: null, input: ta,
       });
     }
-  }
-  for (const el of document.querySelectorAll('.cm-content')) {
-    const cv = el.cmView;
-    const v = cv?.rootView?.view || cv?.view || el.cmTile?.view;
-    if (!v?.state?.doc || has(el)) continue;
-    list.push({ kind: 'codemirror6', el: v.dom || el, lang: '', path: '', get: () => v.state.doc.toString(), set: (t) => v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: t } }) });
-  }
-  for (const el of document.querySelectorAll('.CodeMirror')) {
-    const c = el.CodeMirror;
-    if (!c || has(el)) continue;
-    const mode = c.getOption?.('mode');
-    list.push({ kind: 'codemirror5', el, lang: typeof mode === 'string' ? mode : mode?.name || '', path: '', get: () => c.getValue(), set: (t) => c.setValue(t) });
-  }
-  for (const el of document.querySelectorAll('.ace_editor')) {
-    const a = el.env?.editor;
-    if (!a || has(el)) continue;
-    list.push({ kind: 'ace', el, lang: String(a.session?.getMode?.()?.$id || '').replace('ace/mode/', ''), path: '', get: () => a.getValue(), set: (t) => { a.session.setValue(t); } });
-  }
-  // Monaco without a reachable API (vscode.dev, github.dev): found by its DOM, written by paste.
-  for (const el of document.querySelectorAll('.monaco-editor')) {
-    if (has(el) || !el.offsetParent) continue;
-    const ta = el.querySelector('textarea');
-    list.push({
-      kind: 'monaco-dom', el, lang: el.getAttribute('data-mode-id') || '', path: '', api: false,
-      get: () => [...el.querySelectorAll('.view-line')].sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top)).map((l) => l.textContent.replace(/ /g, ' ')).join('\n'),
-      set: null, input: ta,
-    });
-  }
-  for (const el of document.querySelectorAll('textarea')) {
-    if (has(el) || !el.offsetParent || (el.rows < 4 && el.clientHeight < 80)) continue;
-    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
-    list.push({
-      kind: 'textarea', el, lang: '', path: el.name || el.id || '',
-      get: () => el.value,
-      set: (t) => { setter.call(el, t); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); },
-    });
-  }
+    for (const el of win.document.querySelectorAll('textarea')) {
+      if (has(el) || !el.offsetParent || (el.rows < 4 && el.clientHeight < 80)) continue;
+      const setter = Object.getOwnPropertyDescriptor(win.HTMLTextAreaElement.prototype, 'value').set;
+      list.push({
+        kind: 'textarea', el, lang: '', path: el.name || el.id || '',
+        get: () => el.value,
+        set: (t) => { setter.call(el, t); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); },
+      });
+    }
+    for (const e of list.slice(first)) { e.frame = frame; e.off = off; }
+    for (const f of win.document.querySelectorAll('iframe,frame')) {
+      let w = null;
+      try { w = f.contentWindow; if (!w?.document?.body) w = null; } catch { w = null; }
+      if (!w || frame.split(' > ').length > 3) continue;
+      const r = f.getBoundingClientRect();
+      scan(w, `${frame ? `${frame} > ` : ''}${f.name || f.id || (f.src || '').split('?')[0].slice(-60) || 'iframe'}`, { x: off.x + r.left, y: off.y + r.top });
+    }
+  };
+  scan(window, '', { x: 0, y: 0 });
   const pick = () => {
     const e = list[arg.editor ?? 0];
     if (!e) throw new Error(list.length ? `There is no editor ${arg.editor}; this page has ${list.length} (0–${list.length - 1}).` : 'No code editor found on this page.');
     return e;
   };
-  const box = (el) => { const r = el?.getBoundingClientRect?.(); return r ? { x: Math.round(r.left + Math.min(40, r.width / 2)), y: Math.round(r.top + Math.min(20, r.height / 2)) } : null; };
+  const box = (el, off = { x: 0, y: 0 }) => { const r = el?.getBoundingClientRect?.(); return r ? { x: Math.round(off.x + r.left + Math.min(40, r.width / 2)), y: Math.round(off.y + r.top + Math.min(20, r.height / 2)) } : null; };
   if (op === 'list') {
-    return list.map((e, i) => { const v = e.get(); return { editor: i, kind: e.kind, language: e.lang, path: e.path, lines: v.split('\n').length, chars: v.length, writable: e.api !== false, visibleOnly: e.kind === 'monaco-dom' }; });
+    return list.map((e, i) => { const v = e.get(); return { editor: i, kind: e.kind, language: e.lang, path: e.path, frame: e.frame || '', lines: v.split('\n').length, chars: v.length, writable: e.api !== false, visibleOnly: e.kind === 'monaco-dom' }; });
   }
   const e = pick();
   if (op === 'read') {
@@ -92,7 +106,7 @@ function editorsInPage(op, arg) {
     lines.splice(at, 0, ...String(arg.text ?? '').split('\n'));
     next = lines.join('\n');
   } else throw new Error(`Unknown action ${op}`);
-  if (!e.set) return { needsPaste: true, text: next, point: box(e.el), kind: e.kind };
+  if (!e.set) return { needsPaste: true, text: next, point: box(e.el, e.off), kind: e.kind };
   e.set(next);
   const after = e.get();
   return { kind: e.kind, verified: after === next, lines: after.split('\n').length, changedChars: Math.abs(after.length - before.length) };

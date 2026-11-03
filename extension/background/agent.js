@@ -10,6 +10,7 @@ import { PANEL_TOOLS, MEMORY_TOOLS, ALL_TABS_TOOLS, TASK_TOOLS, WORK_TOOLS, DESK
 import { nativeBridge } from './native-bridge.js';
 import { webTools, SERVER_RESULT_TYPES, summarizeServerResult, citedSources } from './tools/web-tools.js';
 import { listMemory, memoryBlock } from './memory.js';
+import { siteGuides, isSiteGuide, hostOf } from './site-guides.js';
 import { inferaConversations } from './auth.js';
 import { addSpend, lastCurrency, money } from './spend.js';
 
@@ -295,6 +296,7 @@ export class AgentSession {
     this.budgetLimit = Number(settings.taskBudget) || 0;
     this.runStartedAt = Date.now();
     this.devTools = settings.devTools !== false;
+    this.verifyNudged = false;
     this.paused = false;
     this.takenOver = false;
     this.setStatus('running');
@@ -318,9 +320,10 @@ export class AgentSession {
         const content = [tabContextBlock(tabs, initialTabId)];
         const note = this.#contextNote(mode, tabs);
         if (note) content.push({ type: 'text', text: note });
+        if (settings.memory !== false) { const g = await this.#guideNote(tabs); if (g) content.push(g); }
         // Long-term memory goes into the first message of a new conversation.
         if (!this.messages.length && settings.memory !== false) {
-          const mem = memoryBlock(await listMemory().catch(() => []));
+          const mem = memoryBlock((await listMemory().catch(() => [])).filter((m) => !isSiteGuide(m)));
           if (mem) content.push(mem);
         }
         content.push(...this.#attachmentBlocks(attachments));
@@ -501,6 +504,17 @@ export class AgentSession {
     return notes.length ? `<system-reminder>${notes.join('\n\n')}</system-reminder>` : '';
   }
 
+  // The site guides saved for the sites now open, each handed over once per conversation.
+  async #guideNote(tabs) {
+    this.notedGuides ||= new Set();
+    const hosts = [...new Set(tabs.map((t) => hostOf(t.url)))].filter((h) => h && !this.notedGuides.has(h));
+    if (!hosts.length) return null;
+    const found = await siteGuides(hosts);
+    for (const h of hosts) this.notedGuides.add(h);
+    if (!found.size) return null;
+    return { type: 'text', text: [...found].map(([h, m]) => `<site_guide host="${h}" saved="${new Date(m.updatedAt || m.createdAt || Date.now()).toISOString().slice(0, 10)}">\n${m.text}\n</site_guide>`).join('\n') };
+  }
+
   #compact() {
     let size = JSON.stringify(this.messages).length;
     if (size < COMPACT_THRESHOLD_BYTES) return;
@@ -639,6 +653,14 @@ export class AgentSession {
       if (!uses.length) {
         // The user wrote while this step was running: answer that too.
         if (this.queue.length) { this.messages.push({ role: 'user', content: this.#drainQueue() }); continue; }
+        // Self-check, once per task: the answer came while planned steps were never verified.
+        const open = this.steps.filter((x) => x.status === 'pending' || x.status === 'active');
+        if (open.length && !this.verifyNudged && msg.stop_reason === 'end_turn' && this.depth === 0) {
+          this.verifyNudged = true;
+          this.emit({ type: 'info', message: 'Checking the unfinished steps before finishing…' });
+          this.messages.push({ role: 'user', content: [{ type: 'text', text: `<system-reminder>Before you finish: your plan still has ${open.length} step(s) not marked done — ${open.map((x) => `"${x.title}"`).join(', ')}. For each one, either do it and verify it on the page (then mark it done with the evidence), or mark it skip or fail and tell the user why. If you need the user's input or approval to go on, ask now and stop.</system-reminder>` }] });
+          continue;
+        }
         return; // end_turn / max_tokens without tools
       }
 
@@ -687,8 +709,10 @@ export class AgentSession {
         results.push(isToolsetUse(u) ? toolsetResult(u, r) : { type: 'tool_result', tool_use_id: u.id, content: r.content, ...(r.isError ? { is_error: true } : {}) });
       }
       // New site know-how is appended after the results (never edits the system prompt).
-      const note = this.#contextNote(mode, await this.#where());
+      const here = await this.#where();
+      const note = this.#contextNote(mode, here);
       if (note) results.push({ type: 'text', text: note });
+      if (settings.memory !== false) { const g = await this.#guideNote(here); if (g) results.push(g); }
       const back = this.#takeResumeNote();
       if (back) results.push(back);
       if (this.queue.length) results.push(...this.#drainQueue());
