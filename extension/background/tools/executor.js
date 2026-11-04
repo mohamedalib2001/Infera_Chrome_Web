@@ -21,6 +21,7 @@ import { listShortcuts, findShortcut, saveShortcut } from '../shortcuts.js';
 import { saveTask } from '../scheduler.js';
 import { buildFile } from './files.js';
 import { editorScript, pasteScript, devScripts, toHar } from './dev-tools.js';
+import { traceStep, peekTrace } from '../trace.js';
 import { nativeBridge } from '../native-bridge.js';
 import { saveMemory, searchMemory, forgetMemory } from '../memory.js';
 import { saveSiteGuide, siteGuides } from '../site-guides.js';
@@ -228,6 +229,7 @@ const impl = {
       if (!r.allowed) fail(r.reason);
       await chrome.tabs.update(tabId, { url });
       lastHost.set(tabId, c.host);
+      traceStep(ctx.sessionId, tabId, { action: 'navigate', url });
     }
     await sleep(300);
     await waitForLoad(tabId);
@@ -333,6 +335,7 @@ const impl = {
             modifiers: mods,
           });
         });
+        if (a === 'left_click' || a === 'double_click') traceStep(ctx.sessionId, tabId, { action: 'click', target: t.desc });
         await sleep(350);
         await recordFrame(tabId, null);
         return ok(text(`${a === 'hover' ? 'Hovered' : 'Clicked'} ${what}.`));
@@ -364,6 +367,7 @@ const impl = {
         await reverify(tabId, netloc);
         gif.annotateLast(tabId, { type: 'type', label: `Type: ${focused?.sensitive ? '••••' : preview.slice(0, 30)}` });
         await cdp.insertText(tabId, input.text);
+        traceStep(ctx.sessionId, tabId, { action: 'type', value: input.text, target: focused, sensitive: !!focused?.sensitive, append: true });
         await recordFrame(tabId, null);
         return ok(text(`Typed ${input.text.length} character(s).`));
       }
@@ -378,6 +382,7 @@ const impl = {
         await reverify(tabId, netloc);
         gif.annotateLast(tabId, { type: 'key', label: `Key: ${input.text}` });
         for (let i = 0; i < repeat; i++) for (const c of combos) await cdp.pressCombo(tabId, c, mods);
+        if (repeat === 1) for (const c of combos) traceStep(ctx.sessionId, tabId, { action: 'key', value: c });
         await sleep(200);
         await recordFrame(tabId, null);
         return ok(text(`Pressed ${input.text}${repeat > 1 ? ` ${repeat} times` : ''}.`));
@@ -446,6 +451,11 @@ const impl = {
     await reverify(tab.id, netloc);
     const r = await callPage(tab.id, '__inferaFormInput', input.ref, input.value);
     if (!r?.ok) fail(r?.error || 'form_input failed');
+    const v = input.value;
+    const after = desc.tag === 'select' ? await callPage(tab.id, '__inferaDescribeRef', input.ref).catch(() => null) : null;
+    traceStep(ctx.sessionId, tab.id, desc.tag === 'select' ? { action: 'select', value: after?.selected || String(v), target: desc }
+      : typeof v === 'boolean' || desc.type === 'checkbox' || desc.type === 'radio' ? { action: 'toggle', value: v === true || v === 'true', target: desc }
+        : { action: 'type', value: String(v ?? ''), target: desc, sensitive: !!desc.sensitive });
     await recordFrame(tab.id, { type: 'type', label: `Fill: ${desc.name?.slice(0, 30) || input.ref}` });
     return ok(text(r.message));
   },
@@ -666,14 +676,16 @@ const impl = {
     const existing = await findShortcut({ command });
     let sc;
     try {
-      sc = await saveShortcut({ id: existing?.id, command, description: input.description || '', prompt: input.prompt, params, startUrl: input.start_url || '', createdAt: existing?.createdAt });
+      // The steps taken so far in this task come with it, so the skill can be fast-replayed.
+      const tr = peekTrace(ctx.sessionId);
+      sc = await saveShortcut({ id: existing?.id, command, description: input.description || '', prompt: input.prompt, params, startUrl: input.start_url || '', createdAt: existing?.createdAt, recorded: tr.usable ? tr.steps : existing?.recorded, isWorkflow: tr.usable || existing?.isWorkflow });
     } catch (e) { fail(e.message); }
     let when = '';
     if (input.schedule?.frequency) {
       const sch = input.schedule;
       let task;
       try {
-        task = await saveTask({ name: `/${sc.command}`, prompt: sc.prompt, startUrl: sc.startUrl, frequency: sch.frequency, time: sch.time || '09:00', date: sch.date || '', dayOfWeek: sch.day_of_week ?? 1, dayOfMonth: sch.day_of_month ?? 1 });
+        task = await saveTask({ name: `/${sc.command}`, prompt: sc.prompt, startUrl: sc.startUrl, shortcutId: sc.recorded?.length ? sc.id : '', frequency: sch.frequency, time: sch.time || '09:00', date: sch.date || '', dayOfWeek: sch.day_of_week ?? 1, dayOfMonth: sch.day_of_month ?? 1 });
       } catch (e) { fail(`Saved /${sc.command}, but the schedule was refused: ${e.message}`); }
       when = task.nextRun ? ` Scheduled (${sch.frequency}); next run ${new Date(task.nextRun).toLocaleString()}.` : ' Scheduled.';
     }

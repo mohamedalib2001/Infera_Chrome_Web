@@ -209,6 +209,36 @@ const server = http.createServer((req, res) => {
           { type: 'content_block_stop', index: 0 },
           { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }]);
       }
+      if (phase === 'learn') {
+        // The agent reads the page, fills the order form through refs, and submits it.
+        const k = j.messages.filter((m) => m.role === 'assistant').length;
+        const tu = (index, id, name, input) => [
+          { type: 'content_block_start', index, content_block: { type: 'tool_use', id, name, input: {} } },
+          { type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: JSON.stringify(input) } },
+          { type: 'content_block_stop', index },
+        ];
+        if (k === 0) return sse(res, [start('l1'), ...tu(0, 'l_read', 'read_page', { tabId: globalThis.TAB, filter: 'interactive' }),
+          { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }]);
+        if (k === 1) {
+          const tree = JSON.stringify(j.messages.at(-1).content);
+          const ref = (re) => (tree.match(re) || [])[1];
+          const name = ref(/textbox \\"Full name\\" \[(ref_\d+)\]/);
+          const color = ref(/combobox[^[]*\[(ref_\d+)\]/);
+          const agree = ref(/checkbox \\"I agree\\" \[(ref_\d+)\]/);
+          const submit = ref(/button \\"Submit order\\" \[(ref_\d+)\]/);
+          return sse(res, [start('l2'),
+            ...tu(0, 'l_n', 'form_input', { tabId: globalThis.TAB, ref: name, value: 'Rami' }),
+            ...tu(1, 'l_c', 'form_input', { tabId: globalThis.TAB, ref: color, value: 'Green' }),
+            ...tu(2, 'l_a', 'form_input', { tabId: globalThis.TAB, ref: agree, value: true }),
+            ...tu(3, 'l_s', 'computer', { tabId: globalThis.TAB, action: 'left_click', ref: submit }),
+            { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 20 } }, { type: 'message_stop' }]);
+        }
+        return sse(res, [start('l3'),
+          { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+          { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Order submitted.' } },
+          { type: 'content_block_stop', index: 0 },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }]);
+      }
       if (phase === 'overload' && j.model === 'claude-opus-5-5') {
         res.writeHead(529, { 'content-type': 'application/json', 'retry-after': '0.01' });
         return res.end(JSON.stringify({ type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }));
@@ -751,6 +781,68 @@ check('site guide: a long government host name keeps its guide', /Services > Rec
 check('site guide: handed to the agent when it opens the site, not in the general memory', /<site_guide host=.{1,2}127\.0\.0\.1/.test(g0) && /tick I agree/.test(g0) && !/user_memory[^<]*tick I agree/.test(g0), g0.slice(0, 300));
 phase = 'normal';
 
+// Learning by doing: the steps the agent took become a workflow that fast replay runs again
+// without the model; a replay the agent had to finish is repaired with the agent's steps.
+requests.length = 0;
+phase = 'learn';
+const learn = await sw.evaluate(async ({ base, tabId }) => {
+  const I = self.__infera;
+  const win = (await chrome.windows.getAll({ windowTypes: ['normal'] }))[0].id;
+  await I.panelCall(win, { type: 'new_chat' });
+  const s = await I.sessionForWindow(win);
+  s.classicTools = true;
+  s.modelOverride = 'claude-opus-5-5';
+  await chrome.tabs.update(tabId, { url: `${base}/test.html?learn`, active: true });
+  await new Promise((r) => setTimeout(r, 600));
+  let learnedEv = null;
+  s.subscribe((e) => { if (e.type === 'learned') learnedEv = e; });
+  await s.run('Order for Rami in green and submit', { startTabId: tabId });
+  const learned = s.learned;
+  const sc = await I.panelCall(win, { type: 'save_learned', command: 'order-rami' });
+  return { status: s.status, learnedEv, steps: learned?.recorded.map((x) => `${x.action}:${x.target?.name || x.url || ''}:${x.value ?? ''}`), sc: { id: sc.id, recorded: sc.recorded?.length, isWorkflow: sc.isWorkflow } };
+}, { base, tabId });
+const learnReq = requests.length;
+const replayed = await sw.evaluate(async ({ id, tabId }) => {
+  const I = self.__infera;
+  const win = (await chrome.windows.getAll({ windowTypes: ['normal'] }))[0].id;
+  const s = await I.sessionForWindow(win);
+  await chrome.scripting.executeScript({ target: { tabId }, func: () => { document.getElementById('out').textContent = ''; } });
+  await I.panelCall(win, { type: 'replay_workflow', id });
+  for (let i = 0; i < 80 && !(s.status === 'done' && s.steps.length && s.steps.every((x) => x.status === 'done')) && s.status !== 'error'; i++) await new Promise((r) => setTimeout(r, 200));
+  return (await chrome.scripting.executeScript({ target: { tabId }, func: () => document.getElementById('out').textContent }))[0].result;
+}, { id: learn.sc.id, tabId });
+check('learning by doing: a finished task becomes a replayable workflow (fill, choose, tick, submit)', learn.status === 'done' && learn.learnedEv?.steps >= 5 && learn.sc.isWorkflow
+  && JSON.stringify(learn.steps) === JSON.stringify([`navigate:${base}/test.html?learn:`, 'type:Full name:Rami', 'select:Color:Green', 'toggle:I agree:true', 'click:Submit order:']), JSON.stringify(learn));
+check('learning by doing: the saved task replays without the model', replayed === 'submitted:Rami:g:true' && requests.length === learnReq, `${replayed} ${requests.length - learnReq}`);
+const healed = await sw.evaluate(async ({ base, tabId }) => {
+  const I = self.__infera;
+  const win = (await chrome.windows.getAll({ windowTypes: ['normal'] }))[0].id;
+  const sc = await I.panelCall(win, { type: 'save_shortcut', shortcut: { command: 'order-heal', prompt: 'Order for Rami in green and submit', isWorkflow: true, recorded: [{ action: 'navigate', url: `${base}/test.html?heal` }, { action: 'type', value: 'Rami', target: { tag: 'input', name: 'Customer', selector: '#customer-old' } }] } });
+  await I.panelCall(win, { type: 'new_chat' });
+  const s = await I.sessionForWindow(win);
+  s.classicTools = true;
+  s.modelOverride = 'claude-opus-5-5';
+  const infos = [];
+  s.subscribe((e) => { if (e.type === 'info') infos.push(e.message); });
+  await I.panelCall(win, { type: 'replay_workflow', id: sc.id });
+  for (let i = 0; i < 100 && !infos.some((x) => /repaired/.test(x)); i++) await new Promise((r) => setTimeout(r, 200));
+  const after = (await I.panelCall(win, { type: 'list_shortcuts' })).find((x) => x.id === sc.id);
+  return { infos, recorded: after.recorded.map((x) => x.action).join(','), id: sc.id };
+}, { base, tabId });
+const healReq = requests.length;
+const healedRun = await sw.evaluate(async ({ id, tabId }) => {
+  const I = self.__infera;
+  const win = (await chrome.windows.getAll({ windowTypes: ['normal'] }))[0].id;
+  await I.panelCall(win, { type: 'new_chat' });
+  const s = await I.sessionForWindow(win);
+  await I.panelCall(win, { type: 'replay_workflow', id });
+  for (let i = 0; i < 80 && !(s.status === 'done' && s.steps.length && s.steps.every((x) => x.status === 'done')) && s.status !== 'error'; i++) await new Promise((r) => setTimeout(r, 200));
+  return { status: s.status, steps: s.steps.map((x) => x.status).join(','), out: (await chrome.scripting.executeScript({ target: { tabId }, func: () => document.getElementById('out').textContent }))[0].result };
+}, { id: healed.id, tabId });
+check('self-repair: the agent finishes a broken replay and the workflow is repaired with its steps', /repaired/.test(healed.infos.join(' ')) && healed.recorded === 'navigate,type,select,toggle,click', JSON.stringify(healed));
+check('self-repair: the repaired workflow then replays all the way without the model', healedRun.status === 'done' && /^(done,)+done$/.test(healedRun.steps) && healedRun.out === 'submitted:Rami:g:true' && requests.length === healReq, JSON.stringify(healedRun) + ` n=${requests.length - healReq}`);
+phase = 'normal';
+
 // Developer tools: code editors read and written through their own APIs, page diagnostics,
 // a passive security review, and a network log file.
 const dev = await sw.evaluate(async ({ base }) => {
@@ -812,6 +904,7 @@ const fastRun = await sw.evaluate(async ({ base }) => {
     { action: 'click', target: { tag: 'button', name: 'Submit order', selector: '#go' } },
   ];
   const win = (await chrome.windows.getAll({ windowTypes: ['normal'] }))[0].id;
+  await I.panelCall(win, { type: 'new_chat' }); // a fresh conversation for this replay
   const sc = await I.panelCall(win, { type: 'save_shortcut', shortcut: { command: 'order-form', prompt: '1. Fill in the order form for {{name}}\n2. Submit it', params: [{ name: 'name', default: 'Mona' }], isWorkflow: true, recorded } });
   const s = await I.sessionForWindow(win);
   const steps = [];

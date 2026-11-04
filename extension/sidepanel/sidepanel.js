@@ -89,6 +89,7 @@ function onEvent(ev) {
     case 'resumed': live.takenOver = false; refreshLive(); break;
     case 'session_switched': call('state').then(loadState); break;
     case 'batch': renderBatch(ev); break;
+    case 'learned': addLearned(ev); break;
     case 'turn_end': curText = null; curThinking = null; refreshConversations(); break;
     default:
   }
@@ -1122,6 +1123,20 @@ function pickRows(sc) {
   } });
   openDrawer(`${t('runRows')} · /${sc.command}`, [el('div', { class: 'card form' }, el('p', { class: 'muted small', style: 'margin:0' }, t('csvPick', { vars })),
     file, el('label', { class: 'check-row' }, fast, el('span', {}, t('fastRows'))))], 'btnStudio');
+}
+
+// Learning by doing: offer to keep the task the agent just did as a fast workflow.
+function addLearned(ev) {
+  const slug = String(ev.title || 'task').toLowerCase().normalize('NFKD').replace(/[^\w\u0600-\u06FF]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'task';
+  const cmd = el('input', { value: slug, dir: 'ltr', style: 'flex:1;min-width:0' });
+  const card = el('div', { class: 'card item learned', id: 'learnedCard' },
+    el('div', { class: 'row' }, el('span', { class: 'wf-ic' }, ic('bolt')), el('b', { class: 'grow' }, t('learnedTitle'))),
+    el('p', { class: 'muted small', style: 'margin:0' }, t('learnedHint', { n: ev.steps })),
+    el('div', { class: 'row' }, cmd, el('button', { class: 'btn small primary', id: 'learnedSave', onclick: async () => {
+      try { const sc = await call('save_learned', { command: cmd.value }); put(card, el('p', { class: 'small', style: 'margin:0' }, '✓ ', t('learnedSaved', { cmd: sc.command }))); await refreshConversations(); } catch (e) { alert(e.message); }
+    } }, ic('check'), t('learnedSave'))));
+  $('#messages').append(card);
+  scroll();
 }
 
 // The batch progress card in the conversation, updated in place.

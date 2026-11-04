@@ -305,3 +305,4 @@ dialog.capture::backdrop { background: rgba(0, 0, 0, .55); }
   .hcard { grid-template-columns: 1fr; }
   .hcard .h-thumb, .hcard .h-ph { display: none; }
 }
+.learned { border-color: var(--brand-line); box-shadow: var(--glow); }

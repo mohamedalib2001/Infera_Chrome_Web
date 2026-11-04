@@ -261,10 +261,31 @@
     return true;
   };
 
+  // A short CSS path to an element, as the workflow recorder writes it (id, test id or name
+  // first), so steps the agent takes can be replayed later.
+  function cssPath(el) {
+    if (!(el instanceof Element)) return '';
+    if (el.id) return `#${CSS.escape(el.id)}`;
+    const parts = [];
+    while (el && el.nodeType === 1 && parts.length < 5) {
+      let p = el.tagName.toLowerCase();
+      const testId = el.getAttribute('data-testid') || el.getAttribute('name');
+      if (testId) { parts.unshift(`${p}[${el.getAttribute('data-testid') ? 'data-testid' : 'name'}="${testId}"]`); break; }
+      const sib = el.parentElement ? [...el.parentElement.children].filter((c) => c.tagName === el.tagName) : [];
+      if (sib.length > 1) p += `:nth-of-type(${sib.indexOf(el) + 1})`;
+      parts.unshift(p);
+      el = el.parentElement;
+    }
+    return parts.join(' > ');
+  }
+
   function describe(el) {
     if (!el) return null;
     const target = el.closest('a,button,input,select,textarea,[role],label,summary') || el;
     return {
+      selector: cssPath(target),
+      checked: 'checked' in target ? !!target.checked : undefined,
+      selected: target.tagName === 'SELECT' ? target.selectedOptions?.[0]?.textContent.trim() : undefined,
       tag: target.tagName.toLowerCase(),
       role: roleOf(target),
       name: nameOf(target),

@@ -255,6 +255,13 @@ async function handlePanel(msg, s, port) {
       replayInSession(s, sc, tab.id, msg.values || {}).catch((e) => port.postMessage({ type: 'error', message: e.message }));
       return { ok: true };
     }
+    case 'save_learned': {
+      // Learning by doing: the task the agent just finished, saved as a fast-replay workflow.
+      if (!s.learned) throw new Error('There is no finished task to save.');
+      const sc = await saveShortcut({ command: msg.command, description: msg.description || s.learned.title, prompt: s.learned.prompt, recorded: s.learned.recorded, isWorkflow: true, startUrl: s.learned.recorded[0]?.action === 'navigate' ? s.learned.recorded[0].url : '' });
+      s.learned = null;
+      return sc;
+    }
     case 'playwright_export': {
       const sc = (await listShortcuts()).find((x) => x.id === msg.id);
       if (!sc?.recorded?.length) throw new Error('This workflow has no recorded steps.');
@@ -351,8 +358,18 @@ async function replayInSession(s, sc, tabId, values = {}, { fallback = true } = 
   if (s.abort.signal.aborted || !fallback) { s.emit({ type: 'turn_end', status: s.status }); return { ok: false, answer: r.reason }; }
   s.emit({ type: 'info', message: ar ? `توقف التشغيل السريع عند الخطوة ${r.failedAt + 1} (${r.reason}) — يكمل الوكيل الذكي من هنا.` : `Fast replay stopped at step ${r.failedAt + 1} (${r.reason}) — the agent continues from here.` });
   let prompt = renderShortcut(sc, values);
+  s.healing = true;
   prompt = `A fast replay of the recorded workflow /${sc.command} did steps 1–${r.failedAt} of ${plan.length} and stopped at step ${r.failedAt + 1} ("${stepTitle(plan[r.failedAt])}"): ${r.reason}\nLook at the current page and finish the workflow from there (do not redo the steps already done).\n\nThe workflow:\n${prompt}`;
-  await s.run(prompt, { startTabId: tabId });
+  await s.run(prompt, { startTabId: tabId }).finally(() => { s.healing = false; });
+  // Self-repair: the steps the agent took replace the part of the workflow that failed, so the
+  // next replay runs through without the model.
+  if (s.status === 'done' && s.learned?.recorded?.length) {
+    const tail = r.failedAt > 0 && s.learned.recorded[0]?.action === 'navigate' ? s.learned.recorded.slice(1) : s.learned.recorded;
+    const healed = [...plan.slice(0, r.failedAt), ...tail];
+    await saveShortcut({ ...sc, recorded: healed }).catch(() => {});
+    s.emit({ type: 'info', message: ar ? `أُصلح سير العمل /${sc.command}: سيعمل التشغيل السريع حتى النهاية في المرة القادمة.` : `Workflow /${sc.command} repaired: the next fast replay runs all the way through.` });
+  }
+  s.learned = null;
   return { ok: s.status === 'done', answer: lastAnswer(s) };
 }
 

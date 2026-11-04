@@ -11,6 +11,7 @@ import { nativeBridge } from './native-bridge.js';
 import { webTools, SERVER_RESULT_TYPES, summarizeServerResult, citedSources } from './tools/web-tools.js';
 import { listMemory, memoryBlock } from './memory.js';
 import { siteGuides, isSiteGuide, hostOf } from './site-guides.js';
+import { startTrace, endTrace } from './trace.js';
 import { inferaConversations } from './auth.js';
 import { addSpend, lastCurrency, money } from './spend.js';
 
@@ -309,6 +310,8 @@ export class AgentSession {
       }
       let { tabs } = await tabGroups.context(this.id, { createIfEmpty: true, kind: this.kind });
       const initialTabId = startTabId ?? tabs.find((t) => t.active)?.tabId ?? tabs[0]?.tabId;
+      // Learning by doing: the page actions of this task, kept as replayable steps.
+      if (this.depth === 0) startTrace(this.id, tabs.find((t) => t.tabId === initialTabId)?.url || '');
       for (const t of tabs) if (!isRestrictedUrl(t.url)) overlay.show(t.tabId);
 
       if (modelInfo(model).quick) {
@@ -360,6 +363,11 @@ export class AgentSession {
       }
       if (this.status === 'done' || this.status === 'error') await this.#notifyDone(settings);
       if (this.route && (this.status === 'done' || this.status === 'error') && !this.ephemeral) await recordOutcome(this.route.mode, this.status === 'done').catch(() => {});
+      if (this.depth === 0) {
+        const tr = endTrace(this.id);
+        this.learned = this.status === 'done' && tr.usable ? { recorded: tr.steps, prompt: userText, title: this.title } : null;
+        if (this.learned && !this.healing) this.emit({ type: 'learned', steps: tr.steps.length, title: this.title });
+      }
     }
   }
 
