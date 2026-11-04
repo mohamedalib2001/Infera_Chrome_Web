@@ -216,6 +216,26 @@
   }
 
   // Candidate list for the `find` tool: interactive + text elements with centers.
+  // The interactive elements on screen, with refs and boxes, for a marked screenshot.
+  window.__inferaMarks = function (limit = 80) {
+    const out = [];
+    const vw = innerWidth;
+    const vh = innerHeight;
+    for (const el of document.body.querySelectorAll('*')) {
+      if (out.length >= limit) break;
+      if (SKIP_TAGS.has(el.tagName) || isHidden(el)) continue;
+      const role = roleOf(el);
+      if (!isInteractive(el, role)) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 4 || r.height < 4 || r.bottom < 0 || r.right < 0 || r.top > vh || r.left > vw) continue;
+      // The element actually reachable at its centre (not covered by a dialog or overlay).
+      const top = document.elementFromPoint(Math.min(vw - 1, Math.max(0, r.left + r.width / 2)), Math.min(vh - 1, Math.max(0, r.top + r.height / 2)));
+      if (top && top !== el && !el.contains(top) && !top.contains(el)) continue;
+      out.push({ ref: refFor(el), role, name: nameOf(el).slice(0, 60), x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) });
+    }
+    return { marks: out, viewport: { w: vw, h: vh } };
+  };
+
   window.__inferaFindCandidates = function (limit = 1500) {
     const out = [];
     const all = document.body.querySelectorAll('*');

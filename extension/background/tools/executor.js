@@ -692,6 +692,44 @@ const impl = {
     return ok(text(`Saved the skill /${sc.command}${params.length ? ` with ${params.map((p) => `{{${p.name}}}`).join(', ')}` : ''}. The user can run it from the side panel by typing /${sc.command}.${when}`));
   },
 
+  // ---------- marked screenshot ----------
+  async page_marks(ctx, input) {
+    const tab = await resolveTab(ctx, Number(input.tabId ?? input.tab_id));
+    await authorize(ctx, tab, P.READ_PAGE_CONTENT, `Take a marked screenshot of ${tab.title || tab.url}`);
+    const limit = Math.min(120, Math.max(5, Number(input.limit) || 60));
+    const m = await callPage(tab.id, '__inferaMarks', limit);
+    if (!m?.marks) fail('Could not read the page. Take a screenshot instead.');
+    const shot = await withOverlayHidden(tab.id, () => cdp.screenshot(tab.id));
+    const bmp = await createImageBitmap(new Blob([Uint8Array.from(atob(shot.base64), (c) => c.charCodeAt(0))], { type: 'image/jpeg' }));
+    const c = new OffscreenCanvas(bmp.width, bmp.height);
+    const g = c.getContext('2d');
+    g.drawImage(bmp, 0, 0);
+    const k = bmp.width / (m.viewport.w || bmp.width);
+    const COLORS = ['#ff2d55', '#2f6bff', '#00b36b', '#ff9500', '#8b3dff', '#00a3cc'];
+    g.font = `bold ${Math.max(11, Math.round(12 * Math.min(1.4, k * 1.2)))}px sans-serif`;
+    g.textBaseline = 'top';
+    m.marks.forEach((e, i) => {
+      const col = COLORS[i % COLORS.length];
+      const [x, y, w, h] = [e.x * k, e.y * k, e.w * k, e.h * k];
+      g.strokeStyle = col;
+      g.lineWidth = 2;
+      g.strokeRect(x, y, w, h);
+      const label = String(i + 1);
+      const tw = g.measureText(label).width + 6;
+      const lx = Math.max(0, Math.min(bmp.width - tw, x - 1));
+      const ly = Math.max(0, y - 15 >= 0 ? y - 15 : y);
+      g.fillStyle = col;
+      g.fillRect(lx, ly, tw, 15);
+      g.fillStyle = '#fff';
+      g.fillText(label, lx + 3, ly + 1);
+    });
+    bmp.close?.();
+    const blob = await c.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
+    const b64 = await blobToBase64(blob);
+    const legend = m.marks.map((e, i) => `${i + 1}. ${e.ref} ${e.role}${e.name ? ` "${e.name}"` : ''}`).join('\n');
+    return ok(image(b64), text(`${m.marks.length} element(s) marked on ${tab.url}${m.marks.length >= limit ? ` (the first ${limit}; scroll or raise limit for more)` : ''}:\n${legend || '(no clickable element is visible)'}`));
+  },
+
   // ---------- developer tools ----------
   async code_editor(ctx, input) {
     const tab = await resolveTab(ctx, Number(input.tabId ?? input.tab_id));

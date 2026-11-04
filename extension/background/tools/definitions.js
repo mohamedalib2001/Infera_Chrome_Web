@@ -390,6 +390,18 @@ const TAB_ARG = {
 };
 export const DEV_TOOLS = [
   {
+    name: 'page_marks',
+    description: 'A screenshot of the tab with a numbered box on every clickable or editable element that is visible and not covered, plus a list mapping each number to its element ref, role and name. Use it when a page is crowded, when an element is hard to find or to tell apart, on canvas-heavy or unusual apps, or before clicking something you are not sure about. Then act on the element by its ref (e.g. left_click with target {"type":"ref","ref":"ref_12"}, or computer with ref).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        tabId: { type: 'integer', description: 'The tab to mark (the browser toolset\'s tab_id as a number).' },
+        limit: { type: 'integer', description: 'Most elements to mark (default 60, at most 120).' },
+      },
+      required: ['tabId'],
+    },
+  },
+  {
     name: 'code_editor',
     description: 'Read and edit code in code editors on web pages — Monaco (VS Code for the web, GitHub, Azure, many cloud consoles), CodeMirror 5/6 (Replit, Jupyter, CodePen, many CMSs), Ace (Cloud9, Apps Script, some admin panels) and large text areas. Use it instead of clicking and typing in an editor: it writes the whole change at once through the editor itself (no auto-indent or auto-closed brackets), keeps undo, and verifies the result. "list" finds the editors; "read" returns numbered lines; "write" replaces everything; "replace" swaps one exact snippet (copy it from "read", including indentation; set all=true for every occurrence); "insert" adds lines before a line number. After editing, save or run the code the way the site expects (its Save/Run button or keyboard shortcut) and check the result.',
     input_schema: {

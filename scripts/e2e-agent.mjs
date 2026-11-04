@@ -470,7 +470,7 @@ check('long history: summarized on the server at 250k tokens (compaction), outpu
 check('task named for the cost log', decodeURIComponent(requests[0].headers['x-infera-task'] || '') === 'What is on this page?');
 const t0 = requests[0].body.tools;
 check('tools: web search/fetch first, own tools w/ eager streaming, memory, cache_control',
-  t0.length === 37 && t0.some((t) => t.name === 'site_guide') && t0.some((t) => t.name === 'code_editor') && t0.some((t) => t.name === 'devtools') && t0.some((t) => t.name === 'task_steps') && t0.some((t) => t.name === 'export_file') && t0.some((t) => t.name === 'delegate_tasks') && t0.some((t) => t.name === 'task_notes') && t0.some((t) => t.name === 'memory_search') && t0[0].type === 'web_search_20260318' && t0[0].response_inclusion === 'excluded' && t0[1].type === 'web_fetch_20260318'
+  t0.length === 38 && t0.some((t) => t.name === 'page_marks') && t0.some((t) => t.name === 'site_guide') && t0.some((t) => t.name === 'code_editor') && t0.some((t) => t.name === 'devtools') && t0.some((t) => t.name === 'task_steps') && t0.some((t) => t.name === 'export_file') && t0.some((t) => t.name === 'delegate_tasks') && t0.some((t) => t.name === 'task_notes') && t0.some((t) => t.name === 'memory_search') && t0[0].type === 'web_search_20260318' && t0[0].response_inclusion === 'excluded' && t0[1].type === 'web_fetch_20260318'
   && !t0[0].eager_input_streaming && t0[2].eager_input_streaming === true && t0.some((t) => t.name === 'memory_save') && t0.some((t) => t.name === 'all_tabs') && !!t0.at(-1).cache_control,
   t0.map((t) => t.name || t.type).join(','));
 check('tab context in first user msg', JSON.stringify(requests[0].body.messages[0]).includes('<tab_context>'));
@@ -803,6 +803,28 @@ check('site guide: saved per site, a newer one replaces it, secrets refused', /S
 check('site guide: a long government host name keeps its guide', /Services > Recruitment/.test(guide.longRead.text), guide.longRead.text);
 check('site guide: handed to the agent when it opens the site, not in the general memory', /<site_guide host=.{1,2}127\.0\.0\.1/.test(g0) && /tick I agree/.test(g0) && !/user_memory[^<]*tick I agree/.test(g0), g0.slice(0, 300));
 phase = 'normal';
+
+// Marked screenshot: every visible clickable element numbered, with refs that tools act on.
+const marks = await sw.evaluate(async ({ base, tabId }) => {
+  const I = self.__infera;
+  await chrome.tabs.update(tabId, { url: `${base}/test.html?marks`, active: true });
+  await new Promise((r) => setTimeout(r, 700));
+  const s = new I.AgentSession({ kind: 'panel' });
+  await I.tabGroups.adoptTab(s.id, tabId, 'panel');
+  const ctx = { sessionId: s.id, kind: 'panel', mode: 'skip_all_permission_checks', requestApproval: async () => 'once', signal: new AbortController().signal, toolUseId: 'm' };
+  const r = await I.executeTool('page_marks', { tabId }, ctx);
+  const legend = r.content.find((c) => c.type === 'text').text;
+  const img = r.content.find((c) => c.type === 'image');
+  const buy = (legend.match(/(ref_\d+) button "Buy now"/) || [])[1];
+  const name = (legend.match(/(ref_\d+) textbox "Full name"/) || [])[1];
+  await I.executeTool('computer', { action: 'left_click', ref: name, tabId }, ctx);
+  await I.executeTool('computer', { action: 'type', text: 'Marked', tabId }, ctx);
+  const typed = (await chrome.scripting.executeScript({ target: { tabId }, func: () => document.getElementById('name').value }))[0].result;
+  const bmp = await createImageBitmap(new Blob([Uint8Array.from(atob(img.source.data), (c) => c.charCodeAt(0))], { type: 'image/jpeg' }));
+  return { legend, buy, typed, w: bmp.width, h: bmp.height };
+}, { base, tabId });
+check('page marks: a numbered screenshot with refs for the clickable elements', marks.w > 300 && /\d+ element\(s\) marked/.test(marks.legend) && !!marks.buy && /textbox "Full name"/.test(marks.legend), marks.legend.slice(0, 300));
+check('page marks: an element is acted on by its marked ref', marks.typed === 'Marked', marks.typed);
 
 // The reviewer: after a planned task, an independent model checks the answer against a fresh
 // screenshot; a problem it finds sends the agent back once, a confirmation is shown.
