@@ -18,6 +18,7 @@ const html = fs.readFileSync(path.join(root, 'fixtures', 'test.html'));
 const editorsHtml = fs.readFileSync(path.join(root, 'fixtures', 'editors.html'));
 const frameEditorHtml = fs.readFileSync(path.join(root, 'fixtures', 'frame-editor.html'));
 const rowsXlsx = fs.readFileSync(path.join(root, 'fixtures', 'rows.xlsx'));
+const loginHtml = fs.readFileSync(path.join(root, 'fixtures', 'login.html'));
 const outDir = process.env.OUT_DIR || os.tmpdir();
 
 const requests = [];
@@ -410,6 +411,7 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
+  if (req.url.startsWith('/login.html')) { res.writeHead(200, { 'content-type': 'text/html' }); return res.end(loginHtml); }
   if (req.url.startsWith('/rows.xlsx')) { res.writeHead(200, { 'content-type': 'application/octet-stream', 'access-control-allow-origin': '*' }); return res.end(rowsXlsx); }
   if (req.url.startsWith('/frame-editor.html')) { res.writeHead(200, { 'content-type': 'text/html' }); return res.end(frameEditorHtml); }
   if (req.url.startsWith('/editors.html')) { res.writeHead(200, { 'content-type': 'text/html', 'x-frame-options': 'DENY' }); return res.end(editorsHtml); }
@@ -803,6 +805,28 @@ check('site guide: saved per site, a newer one replaces it, secrets refused', /S
 check('site guide: a long government host name keeps its guide', /Services > Recruitment/.test(guide.longRead.text), guide.longRead.text);
 check('site guide: handed to the agent when it opens the site, not in the general memory', /<site_guide host=.{1,2}127\.0\.0\.1/.test(g0) && /tick I agree/.test(g0) && !/user_memory[^<]*tick I agree/.test(g0), g0.slice(0, 300));
 phase = 'normal';
+
+// Sensitive fields are painted over in every screenshot before it reaches the model.
+const masked = await sw.evaluate(async ({ base, tabId }) => {
+  const I = self.__infera;
+  await chrome.tabs.update(tabId, { url: `${base}/login.html`, active: true });
+  await new Promise((r) => setTimeout(r, 700));
+  const s = new I.AgentSession({ kind: 'panel' });
+  await I.tabGroups.adoptTab(s.id, tabId, 'panel');
+  const ctx = { sessionId: s.id, kind: 'panel', mode: 'skip_all_permission_checks', requestApproval: async () => 'once', signal: new AbortController().signal, toolUseId: 'p' };
+  const r = await I.executeTool('computer', { action: 'screenshot', tabId }, ctx);
+  const img = r.content.find((c) => c.type === 'image');
+  const rects = (await chrome.scripting.executeScript({ target: { tabId }, func: () => Object.fromEntries(['user', 'pw', 'card', 'empty'].map((id) => { const b = document.getElementById(id).getBoundingClientRect(); return [id, [b.right - 12, b.top + b.height / 2]]; })) }))[0].result;
+  const vw = (await chrome.scripting.executeScript({ target: { tabId }, func: () => innerWidth }))[0].result;
+  const bmp = await createImageBitmap(new Blob([Uint8Array.from(atob(img.source.data), (c) => c.charCodeAt(0))], { type: 'image/jpeg' }));
+  const c = new OffscreenCanvas(bmp.width, bmp.height);
+  const g = c.getContext('2d');
+  g.drawImage(bmp, 0, 0);
+  const k = bmp.width / vw;
+  const lum = (id) => { const [x, y] = rects[id]; const d = g.getImageData(Math.round(x * k), Math.round(y * k), 1, 1).data; return Math.round((d[0] + d[1] + d[2]) / 3); };
+  return { user: lum('user'), pw: lum('pw'), card: lum('card'), empty: lum('empty') };
+}, { base, tabId });
+check('privacy: password and card fields are painted over in screenshots; other fields are not', masked.pw < 60 && masked.card < 60 && masked.user > 180 && masked.empty > 180, JSON.stringify(masked));
 
 // Marked screenshot: every visible clickable element numbered, with refs that tools act on.
 const marks = await sw.evaluate(async ({ base, tabId }) => {

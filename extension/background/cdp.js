@@ -216,8 +216,28 @@ class CDPManager {
   }
 
   // ---------- screenshots ----------
+  // Fields whose content must never reach the model in a picture: passwords, payment cards,
+  // one-time codes and identity / bank numbers (with a value in them), as CSS-pixel boxes.
+  async sensitiveBoxes(tabId) {
+    const expr = `(() => {
+      const HINT = /(card.?(num|no)|cardnum|cc-?num|cvv|cvc|security.?code|expir|iban|passport|national.?id|id.?number|ssn|social.?security|tax.?id|otp|one.?time|verification.?code|pin\\b|رقم.?البطاقة|الرقم.?السري|رمز.?التحقق|رقم.?الهوية|الآيبان)/i;
+      const out = [];
+      for (const el of document.querySelectorAll('input, textarea')) {
+        if (!el.value) continue;
+        const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
+        const hint = [el.name, el.id, el.getAttribute('aria-label'), el.placeholder, el.labels?.[0]?.innerText].join(' ');
+        if (!(el.type === 'password' || /^cc-|one-time-code|current-password|new-password/.test(ac) || HINT.test(hint))) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth) out.push([r.left - 2, r.top - 2, r.width + 4, r.height + 4]);
+      }
+      return out;
+    })()`;
+    try { return (await this.send(tabId, 'Runtime.evaluate', { expression: expr, returnByValue: true })).result?.value || []; } catch { return []; }
+  }
+
   async screenshot(tabId, { scale = 1 } = {}) {
     const vp = await this.viewport(tabId);
+    const boxes = await this.sensitiveBoxes(tabId);
     const ref = CDPManager.targetSize(vp.w, vp.h);
     this.state(tabId).refFrame = ref;
     const shot = await this.send(tabId, 'Page.captureScreenshot', {
@@ -225,8 +245,9 @@ class CDPManager {
     });
     const s = Math.min(1, Math.max(0.1, Number(scale) || 1));
     const out = { width: Math.round(ref.width * s), height: Math.round(ref.height * s) };
-    const base64 = await resizeJpeg(shot.data, out.width, out.height);
-    return { base64, mediaType: 'image/jpeg', width: out.width, height: out.height, refFrame: ref, viewport: vp };
+    const k = out.width / vp.w;
+    const base64 = await resizeJpeg(shot.data, out.width, out.height, boxes.map(([x, y, w, h]) => [x * k, y * k, w * k, h * k]));
+    return { base64, mediaType: 'image/jpeg', width: out.width, height: out.height, refFrame: ref, viewport: vp, masked: boxes.length };
   }
 
   // Full-resolution crop of a region expressed in the reference frame.
@@ -241,7 +262,9 @@ class CDPManager {
     const w = Math.round((cx1 - cx0) * vp.dpr);
     const h = Math.round((cy1 - cy0) * vp.dpr);
     const t = CDPManager.targetSize(w, h);
-    const base64 = await resizeJpeg(shot.data, t.width, t.height);
+    const kz = t.width / Math.max(1, cx1 - cx0);
+    const boxes = (await this.sensitiveBoxes(tabId)).map(([x, y, bw, bh]) => [(x - cx0) * kz, (y - cy0) * kz, bw * kz, bh * kz]);
+    const base64 = await resizeJpeg(shot.data, t.width, t.height, boxes, true);
     return { base64, mediaType: 'image/jpeg', width: t.width, height: t.height };
   }
 
@@ -416,15 +439,26 @@ export function redactUrl(u) {
   }
 }
 
-async function resizeJpeg(b64, width, height) {
+// Resizes a JPEG and paints over the sensitive boxes (output pixels) so their content never
+// leaves the browser.
+async function resizeJpeg(b64, width, height, masks = [], keepQuality = false) {
   const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
   const bmp = await createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }));
-  if (bmp.width === width && bmp.height === height) { bmp.close(); return b64; }
+  if (bmp.width === width && bmp.height === height && !masks.length) { bmp.close(); return b64; }
   const canvas = new OffscreenCanvas(width, height);
   const ctx = canvas.getContext('2d');
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(bmp, 0, 0, width, height);
   bmp.close();
+  for (const [x, y, w, h] of masks) {
+    ctx.fillStyle = '#111';
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = '#bbb';
+    ctx.font = `${Math.max(9, Math.min(14, h * 0.6))}px sans-serif`;
+    ctx.textBaseline = 'middle';
+    ctx.fillText('•••• hidden', x + 4, y + h / 2, Math.max(10, w - 8));
+  }
+  if (keepQuality) return blobToBase64(await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.9 }));
   const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: SCREENSHOT_QUALITY / 100 });
   return blobToBase64(blob);
 }
