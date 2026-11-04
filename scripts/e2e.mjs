@@ -22,7 +22,7 @@ const url = `http://127.0.0.1:${server.address().port}/test.html`;
 const userDir = fs.mkdtempSync(path.join(os.tmpdir(), 'infera-e2e-'));
 const ctx = await chromium.launchPersistentContext(userDir, {
   headless: true,
-  executablePath: process.env.CHROME_PATH || undefined,
+  executablePath: process.env.CHROME_PATH || chromium.executablePath(),
   args: [`--disable-extensions-except=${extPath}`, `--load-extension=${extPath}`],
 });
 let [sw] = ctx.serviceWorkers();

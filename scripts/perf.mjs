@@ -28,7 +28,7 @@ fs.rmSync(tmpZip, { force: true });
 const userDir = fs.mkdtempSync(path.join(os.tmpdir(), 'infera-perf-'));
 const ctx = await chromium.launchPersistentContext(userDir, {
   headless: true,
-  executablePath: process.env.CHROME_PATH || undefined,
+  executablePath: process.env.CHROME_PATH || chromium.executablePath(),
   args: [`--disable-extensions-except=${extPath}`, `--load-extension=${extPath}`],
 });
 const ours = (w) => w.url().endsWith('/background/service-worker.js');

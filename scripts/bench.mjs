@@ -68,7 +68,7 @@ const extPath = path.join(root, 'extension');
 const userDir = fs.mkdtempSync(path.join(os.tmpdir(), 'infera-bench-'));
 const ctx = await chromium.launchPersistentContext(userDir, {
   headless: !args.includes('--headed'),
-  executablePath: process.env.CHROME_PATH || undefined,
+  executablePath: process.env.CHROME_PATH || chromium.executablePath(),
   viewport: { width: 1280, height: 860 },
   args: [`--disable-extensions-except=${extPath}`, `--load-extension=${extPath}`],
 });

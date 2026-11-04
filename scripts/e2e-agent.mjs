@@ -368,7 +368,7 @@ const base = `http://127.0.0.1:${server.address().port}`;
 
 const ctx = await chromium.launchPersistentContext(fs.mkdtempSync(path.join(os.tmpdir(), 'infera-agent-')), {
   headless: true,
-  executablePath: process.env.CHROME_PATH || undefined,
+  executablePath: process.env.CHROME_PATH || chromium.executablePath(),
   viewport: { width: 420, height: 800 },
   args: [`--disable-extensions-except=${extPath}`, `--load-extension=${extPath}`],
 });

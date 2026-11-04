@@ -43,3 +43,18 @@ An adversarial pass over the new code found and fixed:
 * The real-site benchmark needs internet access and an account token, which this build environment
   does not have; its task list and checks were validated with `--dry`. Its first real run should be
   done on a workstation (instructions in `docs/BENCHMARK.md`), and its pass rate reported as measured.
+
+## 2.4.1
+
+* **Continuous integration** (`.github/workflows/ci.yml`): every push and pull request runs the static
+  checks, the native host, desktop link and relay tests, both end-to-end suites in Chromium, and the
+  performance budget.
+* **Automatic publishing** (`.github/workflows/publish.yml`): pushing a tag such as `v2.4.1` (or
+  running it from the Actions tab) runs every test, builds the store package, uploads it and submits
+  it for review through the Chrome Web Store API. The API keys live in a protected `chrome-web-store`
+  environment with required reviewers, so nothing is published without the owner's approval. Set-up:
+  `docs/PUBLISHING.md`.
+* **Long host names**: a site guide's memory topic holds 40 characters; hosts longer than that (common
+  for government portals) now keep the end of the host as the key, so their guide is found again.
+* A desktop notification when a batch run finishes.
+* Agent end-to-end suite: 125 checks passed.

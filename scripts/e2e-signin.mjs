@@ -10,7 +10,7 @@ const html = fs.readFileSync(new URL('./fixtures/test.html', import.meta.url));
 const srv = http.createServer((q, r) => { r.writeHead(200, { 'content-type': 'text/html' }); r.end(html); });
 await new Promise((r) => srv.listen(0, '127.0.0.1', r));
 const pageUrl = `http://127.0.0.1:${srv.address().port}/test.html`;
-const ctx = await chromium.launchPersistentContext(fs.mkdtempSync(path.join(os.tmpdir(), 'oa-')), { headless: true, viewport: { width: 420, height: 820 }, executablePath: process.env.CHROME_PATH || undefined, args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`] });
+const ctx = await chromium.launchPersistentContext(fs.mkdtempSync(path.join(os.tmpdir(), 'oa-')), { headless: true, viewport: { width: 420, height: 820 }, executablePath: process.env.CHROME_PATH || chromium.executablePath(), args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`] });
 let [sw] = ctx.serviceWorkers(); if (!sw) sw = await ctx.waitForEvent('serviceworker');
 for (let i = 0; i < 100 && !(await sw.evaluate(() => !!self.__infera)); i++) await new Promise((r) => setTimeout(r, 100));
 const check = (n, ok, info = '') => console.log(`${ok ? 'PASS' : 'FAIL'}  ${n} ${info}`);
