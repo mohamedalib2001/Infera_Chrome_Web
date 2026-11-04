@@ -335,7 +335,7 @@ const impl = {
             modifiers: mods,
           });
         });
-        if (a === 'left_click' || a === 'double_click') traceStep(ctx.sessionId, tabId, { action: 'click', target: t.desc });
+        if (a === 'left_click' || a === 'double_click') traceStep(ctx.sessionId, tabId, { action: 'click', target: t.desc, url: tab.url });
         await sleep(350);
         await recordFrame(tabId, null);
         return ok(text(`${a === 'hover' ? 'Hovered' : 'Clicked'} ${what}.`));
@@ -367,7 +367,7 @@ const impl = {
         await reverify(tabId, netloc);
         gif.annotateLast(tabId, { type: 'type', label: `Type: ${focused?.sensitive ? '••••' : preview.slice(0, 30)}` });
         await cdp.insertText(tabId, input.text);
-        traceStep(ctx.sessionId, tabId, { action: 'type', value: input.text, target: focused, sensitive: !!focused?.sensitive, append: true });
+        traceStep(ctx.sessionId, tabId, { action: 'type', value: input.text, target: focused, sensitive: !!focused?.sensitive, append: true, url: tab.url });
         await recordFrame(tabId, null);
         return ok(text(`Typed ${input.text.length} character(s).`));
       }
@@ -382,7 +382,7 @@ const impl = {
         await reverify(tabId, netloc);
         gif.annotateLast(tabId, { type: 'key', label: `Key: ${input.text}` });
         for (let i = 0; i < repeat; i++) for (const c of combos) await cdp.pressCombo(tabId, c, mods);
-        if (repeat === 1) for (const c of combos) traceStep(ctx.sessionId, tabId, { action: 'key', value: c });
+        if (repeat === 1) for (const c of combos) traceStep(ctx.sessionId, tabId, { action: 'key', value: c, url: tab.url });
         await sleep(200);
         await recordFrame(tabId, null);
         return ok(text(`Pressed ${input.text}${repeat > 1 ? ` ${repeat} times` : ''}.`));
@@ -453,9 +453,9 @@ const impl = {
     if (!r?.ok) fail(r?.error || 'form_input failed');
     const v = input.value;
     const after = desc.tag === 'select' ? await callPage(tab.id, '__inferaDescribeRef', input.ref).catch(() => null) : null;
-    traceStep(ctx.sessionId, tab.id, desc.tag === 'select' ? { action: 'select', value: after?.selected || String(v), target: desc }
-      : typeof v === 'boolean' || desc.type === 'checkbox' || desc.type === 'radio' ? { action: 'toggle', value: v === true || v === 'true', target: desc }
-        : { action: 'type', value: String(v ?? ''), target: desc, sensitive: !!desc.sensitive });
+    traceStep(ctx.sessionId, tab.id, desc.tag === 'select' ? { action: 'select', value: after?.selected || String(v), target: desc, url: tab.url }
+      : typeof v === 'boolean' || desc.type === 'checkbox' || desc.type === 'radio' ? { action: 'toggle', value: v === true || v === 'true', target: desc, url: tab.url }
+        : { action: 'type', value: String(v ?? ''), target: desc, sensitive: !!desc.sensitive, url: tab.url });
     await recordFrame(tab.id, { type: 'type', label: `Fill: ${desc.name?.slice(0, 30) || input.ref}` });
     return ok(text(r.message));
   },

@@ -63,6 +63,24 @@ export function stepTitle(s, ar = false) {
   }
 }
 
+/**
+ * The sites a workflow may act on: the hosts of its recorded pages. A replay never acts on any
+ * other site, so a shared or imported workflow cannot wander off to one.
+ */
+export function workflowScope(recorded = []) {
+  const hosts = new Set();
+  for (const s of recorded) {
+    try { if (s.url) hosts.add(new URL(s.url).hostname.replace(/^www\./, '').toLowerCase()); } catch { /* not a URL */ }
+  }
+  return [...hosts];
+}
+const inScope = (scope, url) => {
+  if (!scope.length) return true;
+  let h = '';
+  try { h = new URL(url).hostname.replace(/^www\./, '').toLowerCase(); } catch { return false; }
+  return scope.some((x) => h === x || h.endsWith(`.${x}`) || x.endsWith(`.${h}`));
+};
+
 /** The recorded steps a replay will run: navigations caused by a click or a key are dropped. */
 export function replayPlan(recorded = []) {
   const out = [];
@@ -93,12 +111,21 @@ export async function replay(sc, { tabId, values = {}, signal, onStep = () => {}
     }
     return out;
   };
+  const scope = workflowScope(sc.recorded);
   overlay.show(tabId);
   try {
     for (let i = 0; i < plan.length; i++) {
       if (signal?.aborted) return { ok: false, done: i, failedAt: i, reason: 'Stopped by the user.' };
       const s = plan[i];
       onStep(i, 'start');
+      // Never outside the workflow's own sites (checked before the step and for where it leads).
+      const here = (await chrome.tabs.get(tabId).catch(() => ({}))).url || '';
+      const target = s.action === 'navigate' ? s.url : here;
+      if (!inScope(scope, target)) {
+        const reason = `This workflow works only on ${scope.join(', ')}; the step would act on ${target.split('/')[2] || target}.`;
+        onStep(i, 'fail', reason);
+        return { ok: false, done: i, failedAt: i, reason, outOfScope: true };
+      }
       const fault = await runStep(tabId, s, subst, i === 0).catch((e) => e.message);
       if (fault) { onStep(i, 'fail', fault); return { ok: false, done: i, failedAt: i, reason: fault }; }
       onStep(i, 'done');

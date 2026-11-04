@@ -22,7 +22,7 @@ import { ACCOUNT_ALARM, orgPolicy, refreshOrgPolicy, pollAccountTasks } from './
 import { listMemory, forgetMemory, clearMemory } from './memory.js';
 import { listServers, saveServer, deleteServer } from './remote-mcp.js';
 import { routeTask, routeStats, MODE_IDS } from './router.js';
-import { replay, replayPlan, stepTitle, toPlaywright } from './replay.js';
+import { replay, replayPlan, stepTitle, toPlaywright, workflowScope } from './replay.js';
 
 // ---------------- session registry ----------------
 const sessions = new Map();        // sessionId -> AgentSession
@@ -263,6 +263,7 @@ async function handlePanel(msg, s, port) {
       s.learned = null;
       return sc;
     }
+    case 'workflow_scope': return workflowScope(msg.recorded || []);
     case 'playwright_export': {
       const sc = (await listShortcuts()).find((x) => x.id === msg.id);
       if (!sc?.recorded?.length) throw new Error('This workflow has no recorded steps.');
@@ -357,7 +358,12 @@ async function replayInSession(s, sc, tabId, values = {}, { fallback = true } = 
     return { ok: true, answer: `Replayed ${r.done} steps.` };
   }
   s.setStatus(s.abort.signal.aborted ? 'stopped' : 'idle');
-  if (s.abort.signal.aborted || !fallback) { s.emit({ type: 'turn_end', status: s.status }); return { ok: false, answer: r.reason }; }
+  // Off its own sites a workflow stops for good: the agent does not take over from there.
+  if (s.abort.signal.aborted || !fallback || r.outOfScope) {
+    if (r.outOfScope) s.emit({ type: 'error', message: r.reason });
+    s.emit({ type: 'turn_end', status: s.status });
+    return { ok: false, answer: r.reason };
+  }
   s.emit({ type: 'info', message: ar ? `توقف التشغيل السريع عند الخطوة ${r.failedAt + 1} (${r.reason}) — يكمل الوكيل الذكي من هنا.` : `Fast replay stopped at step ${r.failedAt + 1} (${r.reason}) — the agent continues from here.` });
   let prompt = renderShortcut(sc, values);
   s.healing = true;

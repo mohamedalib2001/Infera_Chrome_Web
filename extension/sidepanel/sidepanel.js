@@ -1056,7 +1056,8 @@ async function savedTab() {
   const importInput = el('input', { type: 'file', accept: 'application/json,.json', hidden: true, onchange: (e) => importWorkflows(e.target.files[0]) });
   const items = state.shortcuts.map((s) => el('div', { class: 'card wf' },
     el('div', { class: 'wf-head' }, el('span', { class: 'wf-ic' }, ic(s.isWorkflow ? 'record' : 'workflow')),
-      el('div', { class: 'grow' }, el('div', { class: 't' }, `/${s.command}`), el('div', { class: 's', dir: 'auto' }, s.description || s.prompt.slice(0, 120))),
+      el('div', { class: 'grow' }, el('div', { class: 't' }, `/${s.command}`), el('div', { class: 's', dir: 'auto' }, s.description || s.prompt.slice(0, 120)),
+        sitesOf(s).length ? el('div', { class: 's', dir: 'ltr', title: t('wfSites') }, `🌐 ${sitesOf(s).join(' · ')}`) : null),
       s.isWorkflow ? el('span', { class: 'badge' }, 'workflow') : null),
     el('div', { class: 'wf-actions' },
       el('button', { class: 'btn small primary', onclick: () => { closeViews(); send(`/${s.command}`); } }, ic('play'), t('run')),
@@ -1083,6 +1084,9 @@ function templatesTab() {
       el('div', { class: 'grow' }, el('div', { class: 't' }, tplTitle(tp.key)), el('div', { class: 's' }, `${tp.steps.length} ${t('steps')}`))),
     el('div', { class: 'wf-actions' }, el('button', { class: 'btn small primary', onclick: () => openEditor({ command: tp.command, description: tplTitle(tp.key), steps: tp.steps.map((text) => ({ kind: /^(لكل|For each)/.test(text) ? 'each' : /^(إذا|If )/.test(text) ? 'if' : /^(تحقّق|Verify)/.test(text) ? 'check' : 'do', text: text.replace(/^(For each |If |Verify that )/, '') })) }) }, t('useTemplate')))));
 }
+
+// The sites a workflow acts on (its recorded pages).
+const sitesOf = (w) => [...new Set((w.recorded || []).map((x) => { try { return new URL(x.url).hostname.replace(/^www\./, ''); } catch { return ''; } }).filter(Boolean))];
 
 function download(name, textBody, type = 'text/plain') {
   const a = el('a', { href: URL.createObjectURL(new Blob([textBody], { type })), download: name });
@@ -1259,6 +1263,9 @@ async function importWorkflows(file) {
   try { data = JSON.parse(await file.text()); } catch { data = null; }
   const list = data?.format === 'infera-workflows' && Array.isArray(data.workflows) ? data.workflows : null;
   if (!list) { alert(t('wfBadFile')); return; }
+  // Say which sites the imported workflows act on before taking them in.
+  const sites = [...new Set(list.flatMap(sitesOf))];
+  if (sites.length && !confirm(t('wfImportSites', { n: list.length, sites: sites.join(', ') }))) return;
   const taken = new Set((state.shortcuts || []).map((s) => s.command));
   let n = 0;
   for (const w of list.slice(0, 200)) {

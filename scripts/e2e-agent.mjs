@@ -411,6 +411,7 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
+  if (req.url.startsWith('/redirect-away')) { res.writeHead(302, { location: `http://localhost:${server.address().port}/test.html?elsewhere` }); return res.end(); }
   if (req.url.startsWith('/login.html')) { res.writeHead(200, { 'content-type': 'text/html' }); return res.end(loginHtml); }
   if (req.url.startsWith('/rows.xlsx')) { res.writeHead(200, { 'content-type': 'application/octet-stream', 'access-control-allow-origin': '*' }); return res.end(rowsXlsx); }
   if (req.url.startsWith('/frame-editor.html')) { res.writeHead(200, { 'content-type': 'text/html' }); return res.end(frameEditorHtml); }
@@ -805,6 +806,25 @@ check('site guide: saved per site, a newer one replaces it, secrets refused', /S
 check('site guide: a long government host name keeps its guide', /Services > Recruitment/.test(guide.longRead.text), guide.longRead.text);
 check('site guide: handed to the agent when it opens the site, not in the general memory', /<site_guide host=.{1,2}127\.0\.0\.1/.test(g0) && /tick I agree/.test(g0) && !/user_memory[^<]*tick I agree/.test(g0), g0.slice(0, 300));
 phase = 'normal';
+
+// Scope: a workflow acts only on the sites it was recorded on; a page that leads elsewhere
+// stops the replay for good (the agent does not take over off-scope).
+requests.length = 0;
+const scoped = await sw.evaluate(async ({ base, tabId }) => {
+  const I = self.__infera;
+  const win = (await chrome.tabs.get(tabId)).windowId;
+  const sc = await I.panelCall(win, { type: 'save_shortcut', shortcut: { command: 'scoped-flow', prompt: 'Fill the name', isWorkflow: true, recorded: [{ action: 'navigate', url: `${base}/redirect-away` }, { action: 'type', value: 'X', url: `${base}/test.html`, target: { tag: 'input', name: 'Full name', selector: '#name' } }] } });
+  await I.panelCall(win, { type: 'new_chat' });
+  const s = await I.sessionForWindow(win);
+  const errors = [];
+  s.subscribe((e) => { if (e.type === 'error') errors.push(e.message); });
+  await chrome.tabs.update(tabId, { active: true });
+  await I.panelCall(win, { type: 'replay_workflow', id: sc.id });
+  for (let i = 0; i < 60 && !s.steps.some((x) => x.status === 'failed'); i++) await new Promise((r) => setTimeout(r, 200));
+  await new Promise((r) => setTimeout(r, 500));
+  return { steps: s.steps.map((x) => x.status).join(','), note: s.steps[1]?.note, errors, status: s.status, scope: await I.panelCall(win, { type: 'workflow_scope', recorded: sc.recorded }) };
+}, { base, tabId });
+check('workflow scope: a replay never acts outside the sites it was recorded on, and the agent does not take over', scoped.steps === 'done,failed' && /works only on 127\.0\.0\.1/.test(scoped.note) && requests.length === 0 && JSON.stringify(scoped.scope) === '["127.0.0.1"]', JSON.stringify(scoped));
 
 // Sensitive fields are painted over in every screenshot before it reaches the model.
 const masked = await sw.evaluate(async ({ base, tabId }) => {
