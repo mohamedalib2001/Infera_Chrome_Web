@@ -12,14 +12,22 @@ export function hostOf(url) {
 
 export const isSiteGuide = (m) => String(m?.topic || '').startsWith(SITE_TOPIC);
 
+// Memory topics hold 40 characters, so a long host keeps its end — the part that names the site
+// (e.g. "…services.portal.example.gov.sa"); saving and looking up use the same key.
+const TOPIC_MAX = 40;
+export const topicFor = (host) => {
+  const room = TOPIC_MAX - SITE_TOPIC.length;
+  return `${SITE_TOPIC}${host.length > room ? host.slice(-room) : host}`;
+};
+
 /** The saved guides for these hosts: Map host -> memory item. */
 export async function siteGuides(hosts) {
-  const want = new Set(hosts.filter(Boolean));
-  if (!want.size) return new Map();
+  const byTopic = new Map(hosts.filter(Boolean).map((h) => [topicFor(h), h]));
+  if (!byTopic.size) return new Map();
   const out = new Map();
   for (const m of await listMemory().catch(() => [])) {
-    const h = isSiteGuide(m) ? m.topic.slice(SITE_TOPIC.length) : '';
-    if (want.has(h) && !out.has(h)) out.set(h, m);
+    const h = isSiteGuide(m) ? byTopic.get(m.topic) : undefined;
+    if (h && !out.has(h)) out.set(h, m);
   }
   return out;
 }
@@ -30,7 +38,7 @@ export async function saveSiteGuide(host, text) {
   if (!/^[a-z0-9.-]+$/.test(h)) throw new Error('Give the site as a host name, e.g. portal.example.gov.');
   const body = String(text ?? '').trim();
   if (body.length < 20) throw new Error('Write a useful guide: where things are, the steps that worked, pitfalls.');
-  const topic = `${SITE_TOPIC}${h}`.slice(0, 40);
+  const topic = topicFor(h);
   const old = (await listMemory().catch(() => [])).filter((m) => m.topic === topic);
   const item = await saveMemory(body.slice(0, 1990), { topic });
   for (const m of old) if (m.id !== item.id) await forgetMemory(m.id).catch(() => {});

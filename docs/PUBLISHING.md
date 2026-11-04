@@ -75,6 +75,34 @@ node scripts/build-store.mjs --api-url https://inferaagent.com --version 1.0.0
 | `downloads` | حفظ تسجيلات GIF واللقطات، والتنزيلات بعد موافقة المستخدم |
 | `<all_urls>` | الوكيل يعمل على أي موقع يطلبه المستخدم |
 
+## 3-تلقائي) النشر التلقائي من GitHub (Automatic publishing)
+
+بعد إعداده مرة واحدة، يكفي دفع وسم إصدار (مثل `v2.4.1`) لتشغّل GitHub كل الاختبارات، ثم تبني الحزمة
+وترفعها على المتجر وتقدّمها للمراجعة تلقائيًا (`.github/workflows/publish.yml`). لا يُنشر شيء إذا فشل
+أي اختبار.
+
+**الإعداد (مرة واحدة):**
+
+1. في Google Cloud Console أنشئ مشروعًا (أو استخدم مشروعًا قائمًا) وفعّل **Chrome Web Store API**.
+2. من APIs & Services → Credentials أنشئ **OAuth client ID** من نوع *Desktop app*، واحفظ
+   Client ID وClient secret.
+3. احصل على **refresh token** بحساب Google الذي يملك الإضافة في لوحة المطوّرين، بنطاق
+   `https://www.googleapis.com/auth/chromewebstore` (مثلًا عبر OAuth 2.0 Playground مع
+   "Use your own OAuth credentials").
+4. في المستودع على GitHub: Settings → Environments → أنشئ بيئة باسم `chrome-web-store`
+   وفعّل **Required reviewers** (حتى لا يُنشر إصدار إلا بموافقتك)، ثم أضف إليها الأسرار:
+   `CWS_CLIENT_ID` و`CWS_CLIENT_SECRET` و`CWS_REFRESH_TOKEN`.
+
+**كل إصدار بعد ذلك:**
+
+```
+# ارفع الرقم في extension/manifest.json، ثم:
+git tag v2.4.1 && git push origin v2.4.1
+```
+
+أو من GitHub: Actions → *Publish to Chrome Web Store* → Run workflow. تظهر نتيجة الرفع والتقديم في
+سجل التشغيل، وتُحفظ الحزمة نفسها كمرفق للتشغيل. كل دفع للكود يشغّل أيضًا `ci.yml` (الاختبارات فقط).
+
 ## 3أ) Microsoft Edge Add-ons
 
 نفس ملف ZIP يعمل على Edge دون تعديل. افتح https://partner.microsoft.com/dashboard/microsoftedge ← حساب مطوّر

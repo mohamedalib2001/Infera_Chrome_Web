@@ -735,15 +735,19 @@ const guide = await sw.evaluate(async ({ tabId }) => {
   const second = await T({ action: 'save', host: '127.0.0.1', text: 'Order form is on /test.html; Full name, colour, tick I agree; Submit order at the bottom; the result shows under the form' });
   const secret = await T({ action: 'save', host: '127.0.0.1', text: 'Sign in with password: hunter2 then open the form page' });
   const read = await T({ action: 'read', host: '127.0.0.1' });
+  const longHost = 'eservices.ministry-of-labour-and-social-development.example.gov.sa';
+  await T({ action: 'save', host: longHost, text: 'New requests are under Services > Recruitment; dates are DD/MM/YYYY' });
+  const longRead = await T({ action: 'read', host: longHost });
   const s = new I.AgentSession({ kind: 'panel' });
   s.classicTools = true;
   s.modelOverride = 'claude-opus-5-5';
   await s.run('What is on this page?', { startTabId: tabId });
   const guides = (await chrome.storage.local.get('userMemory')).userMemory.filter((m) => m.topic === 'site:127.0.0.1').length;
-  return { first, second, secret, read, guides };
+  return { first, second, secret, read, guides, longRead };
 }, { tabId });
 const g0 = JSON.stringify(requests[0]?.body.messages[0] || '');
 check('site guide: saved per site, a newer one replaces it, secrets refused', /Saved the guide for 127\.0\.0\.1/.test(guide.first.text) && /Updated the guide/.test(guide.second.text) && guide.secret.err && guide.guides === 1 && /tick I agree/.test(guide.read.text), JSON.stringify(guide));
+check('site guide: a long government host name keeps its guide', /Services > Recruitment/.test(guide.longRead.text), guide.longRead.text);
 check('site guide: handed to the agent when it opens the site, not in the general memory', /<site_guide host=.{1,2}127\.0\.0\.1/.test(g0) && /tick I agree/.test(g0) && !/user_memory[^<]*tick I agree/.test(g0), g0.slice(0, 300));
 phase = 'normal';
 

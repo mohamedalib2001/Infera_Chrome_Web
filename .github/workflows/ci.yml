@@ -1,0 +1,27 @@
+# Every push and pull request: static checks, native host / desktop link / relay tests, and
+# both end-to-end suites in a real Chromium with the extension loaded.
+name: CI
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Install
+        run: |
+          npm ci --prefix bridge-relay --no-audit --no-fund
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Static, native host, desktop link and relay tests
+        run: npm test
+      - name: End-to-end (every tool through the service worker)
+        run: xvfb-run -a node scripts/e2e.mjs
+      - name: End-to-end (the agent, the panel and the settings page)
+        run: xvfb-run -a node scripts/e2e-agent.mjs
+      - name: Performance budget
+        run: xvfb-run -a node scripts/perf.mjs --runs 9

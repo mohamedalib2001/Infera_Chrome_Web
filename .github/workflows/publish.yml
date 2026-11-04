@@ -1,0 +1,59 @@
+# Publishes a release to the Chrome Web Store when a tag like v2.4.1 is pushed (or by hand from
+# the Actions tab): runs every test, builds the store package, uploads it and submits it for
+# review. Needs three repository secrets (see docs/PUBLISHING.md → Automatic publishing):
+# CWS_CLIENT_ID, CWS_CLIENT_SECRET, CWS_REFRESH_TOKEN.
+name: Publish to Chrome Web Store
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version: { description: 'Version to publish (e.g. 2.4.1); empty = the manifest version', required: false }
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: chrome-web-store
+    env:
+      ITEM_ID: nablmcconmoblabfpbcfaplmbijmgdjc
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Version
+        id: v
+        run: |
+          V="${{ github.event.inputs.version }}"
+          if [ -z "$V" ] && [ "${GITHUB_REF_TYPE}" = "tag" ]; then V="${GITHUB_REF_NAME#v}"; fi
+          if [ -z "$V" ]; then V=$(node -p "require('./extension/manifest.json').version"); fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+      - name: Install
+        run: |
+          npm ci --prefix bridge-relay --no-audit --no-fund
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Tests (a release never skips them)
+        run: |
+          npm test
+          xvfb-run -a node scripts/e2e.mjs
+          xvfb-run -a node scripts/e2e-agent.mjs
+      - name: Build the store package
+        run: node scripts/build-store.mjs --api-url https://inferaagent.com --version "${{ steps.v.outputs.version }}"
+      - name: Upload and submit for review
+        env:
+          CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+          ZIP="dist/infera-agent-${{ steps.v.outputs.version }}.zip"
+          TOKEN=$(curl -fsS https://oauth2.googleapis.com/token -d client_id="$CLIENT_ID" -d client_secret="$CLIENT_SECRET" -d refresh_token="$REFRESH_TOKEN" -d grant_type=refresh_token | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.parse(s).access_token))")
+          echo "Uploading $ZIP"
+          curl -fsS -X PUT -H "Authorization: Bearer $TOKEN" -H "x-goog-api-version: 2" -T "$ZIP" "https://www.googleapis.com/upload/chromewebstore/v1.1/items/$ITEM_ID" | tee upload.json
+          node -e "const r=require('./upload.json'); if (r.uploadState !== 'SUCCESS' && r.uploadState !== 'IN_PROGRESS') { console.error(JSON.stringify(r.itemError || r)); process.exit(1); }"
+          echo "Submitting for review"
+          curl -fsS -X POST -H "Authorization: Bearer $TOKEN" -H "x-goog-api-version: 2" -H "Content-Length: 0" "https://www.googleapis.com/chromewebstore/v1.1/items/$ITEM_ID/publish" | tee publish.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: infera-agent-${{ steps.v.outputs.version }}
+          path: dist/infera-agent-${{ steps.v.outputs.version }}.zip

@@ -1,6 +1,6 @@
 {
   "name": "infera-chrome-web",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "private": true,
   "type": "module",
   "description": "Infera Agent \u2014 browser agent extension for Chrome with a native/MCP bridge and cloud relay",

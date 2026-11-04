@@ -394,6 +394,11 @@ async function runBatch(port, windowId, sc, rows, fast) {
   batch.finishedAt = Date.now();
   await setLocal('lastBatch', { ...batch });
   post({ finished: true });
+  // A long batch usually finishes while the person is elsewhere.
+  if ((await getSettings()).notifications) {
+    const ok = batch.results.filter((r) => r.status === 'done').length;
+    chrome.notifications.create(`infera-batch:${batch.startedAt}`, { type: 'basic', iconUrl: 'icons/icon128.png', title: `Infera Agent Web — /${sc.command}`, message: `Batch finished: ${ok} of ${batch.total} rows done.`, priority: 1 });
+  }
 }
 
 // ---------------- one-shot messages (options page, content scripts, popups) ----------------
