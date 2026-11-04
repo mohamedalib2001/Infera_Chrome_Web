@@ -23,6 +23,7 @@ import { listMemory, forgetMemory, clearMemory } from './memory.js';
 import { listServers, saveServer, deleteServer } from './remote-mcp.js';
 import { routeTask, routeStats, MODE_IDS } from './router.js';
 import { replay, replayPlan, stepTitle, toPlaywright, workflowScope } from './replay.js';
+import { logActivity, listActivity, clearActivity, activityCsv } from './activity.js';
 
 // ---------------- session registry ----------------
 const sessions = new Map();        // sessionId -> AgentSession
@@ -348,6 +349,7 @@ async function replayInSession(s, sc, tabId, values = {}, { fallback = true } = 
       if (st === 'start') step.status = 'active';
       else if (st === 'done') step.status = 'done';
       else { step.status = 'failed'; step.note = String(note || '').slice(0, 160); }
+      if (st !== 'start') logActivity({ task: `/${sc.command}`, kind: 'replay', action: plan[i]?.action, site: (() => { try { return new URL(plan[i]?.url || '').hostname; } catch { return ''; } })(), result: st === 'done' ? 'ok' : 'error', detail: st === 'done' ? step.title : step.note });
       s.emit({ type: 'steps', steps: s.steps });
     },
   });
@@ -441,6 +443,9 @@ async function handleMessage(msg, sender) {
     case 'get_settings': return getSettings();
     case 'update_settings': return updateSettings(msg.patch || {});
     case 'get_policy': return getManagedPolicy();
+    case 'activity_list': return (await listActivity()).slice(-(Number(msg.limit) || 5000));
+    case 'activity_csv': return activityCsv(await listActivity());
+    case 'activity_clear': await clearActivity(); return [];
     case 'list_permissions': return permissions.list();
     case 'revoke_permission': await permissions.revoke(msg.id); return permissions.list();
     case 'revoke_all_permissions': await permissions.revokeAll(); return [];

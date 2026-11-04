@@ -12,6 +12,7 @@ import { webTools, SERVER_RESULT_TYPES, summarizeServerResult, citedSources } fr
 import { listMemory, memoryBlock } from './memory.js';
 import { siteGuides, isSiteGuide, hostOf } from './site-guides.js';
 import { startTrace, endTrace } from './trace.js';
+import { logActivity } from './activity.js';
 import { inferaConversations } from './auth.js';
 import { addSpend, lastCurrency, money } from './spend.js';
 
@@ -125,7 +126,12 @@ export class AgentSession {
     const id = uuid();
     this.setStatus('waiting');
     return new Promise((resolve) => {
-      const done = (answer) => { this.pending.delete(id); this.setStatus(this.paused ? 'paused' : 'running'); resolve(answer); };
+      const done = (answer) => {
+        this.pending.delete(id);
+        this.setStatus(this.paused ? 'paused' : 'running');
+        logActivity({ task: this.title, kind: 'approval', action: req.type, site: req.netloc || '', result: answer, detail: String(req.description || '').slice(0, 200) });
+        resolve(answer);
+      };
       this.pending.set(id, done);
       const payload = {
         id, permissionType: req.type, netloc: req.netloc, url: req.url, description: req.description,
@@ -748,6 +754,9 @@ export class AgentSession {
           r = await executeTool(u.name, u.input, this.#toolCtx(mode, settings, u.id));
         }
         this.emit({ type: 'tool_result', id: u.id, name: u.name, isError: !!r.isError, content: r.content.filter((b) => b.type !== 'browser_state').map(uiBlock) });
+        if (!['task_steps', 'task_notes', 'turn_answer_start'].includes(u.name)) {
+          logActivity({ task: this.title, kind: 'tool', action: u.name === 'computer' || isToolsetUse(u) ? `${u.name}${u.input?.action ? `:${u.input.action}` : ''}` : u.name, site: this.site, result: r.isError ? 'error' : 'ok', detail: r.isError ? String(r.content.find((b) => b.type === 'text')?.text || '').slice(0, 200) : '' });
+        }
         const shot = r.content.find((b) => b.type === 'image' && b.source?.data);
         if (shot) this.lastShot = shot.source;
         results.push(isToolsetUse(u) ? toolsetResult(u, r) : { type: 'tool_result', tool_use_id: u.id, content: r.content, ...(r.isError ? { is_error: true } : {}) });

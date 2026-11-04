@@ -19,6 +19,7 @@ const el = (tag, attrs = {}, ...kids) => {
 const L = {
   en: {
     about: 'About and legal', aboutHint: 'Infera Agent Web is published and operated by:', privacyPolicy: 'Privacy policy', terms: 'Terms of use', supportMail: 'Support', privacyMail: 'Privacy and data requests', ico: 'You can also complain to the UK Information Commissioner\'s Office (ico.org.uk).',
+    activity: 'Activity log', activityHint: 'What the agent did, where and when: {n} entries kept in this browser only (the last 5,000). Export them as a CSV file for your records or your company\'s audit.', activityExport: 'Export CSV', activityClear: 'Clear', activityClearQ: 'Clear the whole activity log?',
     voiceTitle: 'Voice control', voiceHint: 'Click the microphone in the side panel (or press Ctrl+Shift+Space) and speak your request in Arabic or English. While a task runs, say "stop", "pause", "resume", "take over" or "give control back"; answer an approval with "yes" or "no".', voiceAuto: 'Send a spoken request as soon as I stop speaking', voiceReplies: 'Read answers and approval requests aloud', voiceHands: 'Hands-free: listen again after each spoken reply', voicePrivacy: 'Speech is recognised on this device when Chrome has the language installed; otherwise Chrome sends the audio to Google\'s speech service to turn it into text. Only the resulting text reaches Infera Agent, like a typed request. Spoken replies are made by the browser on this device.',
     reviewerOn: 'Independent reviewer: after a task of several steps, a second model checks the result on the page before the task counts as done (one small extra charge per task)',
     remoteTasks: 'Run tasks I send from my Infera Agent account (app or phone) in this browser', teamRules: 'Your team ({orgs}) applies its rules here: {n} blocked sites.', teamCap: 'Daily limit: {cap}.', teamOff: 'The team has turned the browser agent off.', fromApp: 'from the app',
@@ -49,7 +50,7 @@ const L = {
     about: 'عن الإضافة والمعلومات القانونية', aboutHint: 'تنشر إضافة Infera Agent Web وتشغّلها:', privacyPolicy: 'سياسة الخصوصية', terms: 'شروط الاستخدام', supportMail: 'الدعم', privacyMail: 'الخصوصية وطلبات البيانات', ico: 'ويحق لك أيضًا تقديم شكوى إلى مكتب مفوّض المعلومات في المملكة المتحدة (ico.org.uk).',
     remoteTasks: 'نفّذ في هذا المتصفح المهام التي أرسلها من حسابي على إنفرا إيجنت (التطبيق أو الهاتف)', teamRules: 'يطبّق فريقك ({orgs}) قواعده هنا: {n} موقعًا محظورًا.', teamCap: 'الحد اليومي: {cap}.', teamOff: 'أوقف الفريق وكيل المتصفح.', fromApp: 'من التطبيق',
     modelsTitle: 'النماذج والأداء', modelsHint: 'اختر مقدار القوة التي يستخدمها الوكيل. وضع التشغيل يختار النموذج ومستوى التفكير لكل مهمة جديدة، أو اختر نموذجًا واحدًا لكل المهام.', chooseModel: 'أو اختر نموذجًا',
-    voiceTitle: 'التحكم الصوتي', voiceHint: 'اضغط الميكروفون في اللوحة الجانبية (أو Ctrl+Shift+Space) وقل طلبك بالعربية أو الإنجليزية. أثناء التنفيذ قل «توقف» أو «إيقاف مؤقت» أو «كمل» أو «خليني» أو «ارجع للوكيل»، وأجب طلب الموافقة بـ«نعم» أو «لا».', voiceAuto: 'أرسل الطلب المنطوق فور انتهائي من الكلام', voiceReplies: 'اقرأ الإجابات وطلبات الموافقة بصوت مسموع', voiceHands: 'بدون يدين: استمع من جديد بعد كل رد منطوق', voicePrivacy: 'يُتعرَّف على الكلام على هذا الجهاز إن كانت اللغة مثبّتة في كروم؛ وإلا يرسل كروم الصوت إلى خدمة الكلام من Google لتحويله إلى نص. لا يصل إلى إنفرا إيجنت إلا النص الناتج، مثل الطلب المكتوب. والرد المنطوق يصدره المتصفح على هذا الجهاز.', reviewerOn: 'مراجِع مستقل: بعد كل مهمة من عدة خطوات يتحقق نموذج ثانٍ من النتيجة على الصفحة قبل اعتبارها منجزة (تكلفة إضافية صغيرة لكل مهمة)', subtitle: 'الإعدادات والأذونات والاتصالات', account: 'حساب إنفرا إيجنت', accountHint: 'سجّل الدخول بحسابك على inferaagent.com. تمرّ طلبات النموذج عبر إنفرا إيجنت وتُخصم من رصيدك، فلا يُخزَّن أي مفتاح API في المتصفح. استخدام الإضافة يتطلب حسابًا على إنفرا إيجنت.',
+    activity: 'سجل النشاط', activityHint: 'ما فعله الوكيل وأين ومتى: {n} إدخالًا محفوظة في هذا المتصفح فقط (آخر 5000). صدّرها كملف CSV لسجلاتك أو لتدقيق شركتك.', activityExport: 'تصدير CSV', activityClear: 'مسح', activityClearQ: 'مسح سجل النشاط كله؟', voiceTitle: 'التحكم الصوتي', voiceHint: 'اضغط الميكروفون في اللوحة الجانبية (أو Ctrl+Shift+Space) وقل طلبك بالعربية أو الإنجليزية. أثناء التنفيذ قل «توقف» أو «إيقاف مؤقت» أو «كمل» أو «خليني» أو «ارجع للوكيل»، وأجب طلب الموافقة بـ«نعم» أو «لا».', voiceAuto: 'أرسل الطلب المنطوق فور انتهائي من الكلام', voiceReplies: 'اقرأ الإجابات وطلبات الموافقة بصوت مسموع', voiceHands: 'بدون يدين: استمع من جديد بعد كل رد منطوق', voicePrivacy: 'يُتعرَّف على الكلام على هذا الجهاز إن كانت اللغة مثبّتة في كروم؛ وإلا يرسل كروم الصوت إلى خدمة الكلام من Google لتحويله إلى نص. لا يصل إلى إنفرا إيجنت إلا النص الناتج، مثل الطلب المكتوب. والرد المنطوق يصدره المتصفح على هذا الجهاز.', reviewerOn: 'مراجِع مستقل: بعد كل مهمة من عدة خطوات يتحقق نموذج ثانٍ من النتيجة على الصفحة قبل اعتبارها منجزة (تكلفة إضافية صغيرة لكل مهمة)', subtitle: 'الإعدادات والأذونات والاتصالات', account: 'حساب إنفرا إيجنت', accountHint: 'سجّل الدخول بحسابك على inferaagent.com. تمرّ طلبات النموذج عبر إنفرا إيجنت وتُخصم من رصيدك، فلا يُخزَّن أي مفتاح API في المتصفح. استخدام الإضافة يتطلب حسابًا على إنفرا إيجنت.',
     signIn: 'تسجيل الدخول', signOut: 'تسجيل الخروج', signedIn: 'تم تسجيل الدخول', notSignedIn: 'لم يتم تسجيل الدخول',
     behaviour: 'سلوك الوكيل', behaviourHint: 'الإعدادات الافتراضية للمهام الجديدة، ويمكن تغيير النموذج ووضع الموافقة من اللوحة الجانبية أيضًا.',
     model: 'النموذج الافتراضي', effort: 'مستوى الجهد', mode: 'وضع الموافقة', safety: 'فاحص أمان مستقل لكل إجراء (في وضع الموافقة التلقائية)', language: 'لغة الواجهة',
@@ -208,6 +209,23 @@ async function render() {
       : el('p', { class: 'muted' }, tr('noMemory')),
     memories.length ? el('div', { class: 'actions' }, el('button', { class: 'btn', onclick: async () => { if (confirm(tr('clearMemoryQ'))) { await send('clear_memory'); render(); } } }, tr('clearMemory'))) : null));
 
+  // Activity log (this browser only)
+  const acts = await send('activity_list', { limit: 5000 });
+  const actRows = acts.slice(-25).reverse().map((a) => el('tr', {},
+    el('td', { class: 'muted', style: 'white-space:nowrap' }, new Date(a.at).toLocaleString(currentLang())),
+    el('td', {}, a.task || ''), el('td', {}, `${a.kind}: ${a.action || ''}`), el('td', { style: 'direction:ltr' }, a.site || ''),
+    el('td', {}, el('span', { class: `pill ${a.result === 'ok' || a.result === 'once' || a.result === 'always' ? 'ok' : 'bad'}` }, a.result || ''))));
+  app.append(el('section', { class: 'card', id: 'activity' },
+    el('h2', {}, tr('activity')), el('p', { class: 'muted' }, tr('activityHint').replace('{n}', acts.length)),
+    acts.length ? el('table', {}, el('tbody', {}, ...actRows)) : el('p', { class: 'muted' }, tr('none')),
+    el('div', { class: 'actions' },
+      el('button', { class: 'btn', id: 'activityExport', disabled: acts.length ? undefined : true, onclick: async () => {
+        const csv = await send('activity_csv');
+        const a = el('a', { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `infera-activity-${new Date().toISOString().slice(0, 10)}.csv` });
+        document.body.append(a); a.click(); setTimeout(() => a.remove(), 500);
+      } }, tr('activityExport')),
+      el('button', { class: 'btn danger', disabled: acts.length ? undefined : true, onclick: async () => { if (confirm(tr('activityClearQ'))) { await send('activity_clear'); render(); } } }, tr('activityClear')))));
+
   // Approved sites
   const perms = await send('list_permissions');
   const tbody = el('tbody', {}, ...perms.map((p) => el('tr', {},
@@ -287,7 +305,7 @@ async function render() {
     el('p', { class: 'muted', style: 'font-size:12px;margin:10px 0 0' }, `Extension ID: ${chrome.runtime.id} · v${chrome.runtime.getManifest().version}`)));
 
   // Section navigation (built from the sections on the page, so it always matches them).
-  const NAV_IC = { mic: 'mic', voice: 'mic', account: 'user', models: 'brain', behaviour: 'settings', memory: 'memory', sites: 'shield', blocklist: 'x', connections: 'plug', mcp: 'layers', policy: 'shield', about: 'info' };
+  const NAV_IC = { mic: 'mic', voice: 'mic', activity: 'history', account: 'user', models: 'brain', behaviour: 'settings', memory: 'memory', sites: 'shield', blocklist: 'x', connections: 'plug', mcp: 'layers', policy: 'shield', about: 'info' };
   const nav = $('#nav');
   nav.replaceChildren(...[...app.querySelectorAll('section.card[id]')].map((sec) => el('a', { href: `#${sec.id}`, class: 'nav-link', onclick: (e) => { e.preventDefault(); sec.scrollIntoView({ behavior: 'smooth', block: 'start' }); nav.querySelectorAll('a').forEach((a) => a.classList.toggle('on', a === e.currentTarget)); } },
     icon(NAV_IC[sec.id] || 'info', { size: 16 }), el('span', {}, sec.querySelector('h2')?.textContent || sec.id))));

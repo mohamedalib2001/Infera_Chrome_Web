@@ -1413,6 +1413,14 @@ check('settings: the team applying its rules is shown', /Acme Owner/.test(await 
 check('settings: the registered company (UK trading disclosure) and legal links', /Infera Engine Ltd/.test(about) && /17520775/.test(about) && /128 City Road/.test(about) && /ZC275369/.test(about) && /privacy@inferaengine\.com/.test(about)
   && (await op.locator('#about a[href="https://inferaagent.com/privacy"]').count()) === 1, about.slice(0, 300));
 check('settings: no empty organization-policy card; version shown under About', (await op.locator('#policy').count()) === 0 && /v\d+\.\d+\.\d+/.test(about), about.slice(-120));
+const act = await sw.evaluate(async () => {
+  const rows = await self.__infera.optionsCall({ type: 'activity_list' });
+  const csv = await self.__infera.optionsCall({ type: 'activity_csv' });
+  return { n: rows.length, kinds: [...new Set(rows.map((r) => r.kind))], ok: rows.every((r) => r.at && r.kind && r.action), csv: csv.slice(0, 60) };
+});
+check('activity log: tool steps, replays and approvals recorded, exported as CSV', act.n > 5 && act.ok && act.kinds.includes('tool') && act.kinds.includes('replay')
+  && act.csv.startsWith('\uFEFFtime,task,kind,action,site,result,detail'), JSON.stringify(act));
+check('activity log: shown in settings with export and clear', (await op.locator('#activity').count()) === 1 && (await op.locator('#activityExport').count()) === 1, String(await op.locator('#activity').count()));
 const sys0 = JSON.stringify(requests.length ? requests[0].body.system : '');
 check('agent knows its company: Infera Engine Ltd, England and Wales, no. 17520775', /Infera Engine Ltd/.test(sys0) && /17520775/.test(sys0), sys0.slice(0, 200));
 
