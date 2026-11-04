@@ -90,7 +90,8 @@ function onEvent(ev) {
     case 'session_switched': call('state').then(loadState); break;
     case 'batch': renderBatch(ev); break;
     case 'learned': addLearned(ev); break;
-    case 'turn_end': curText = null; curThinking = null; refreshConversations(); break;
+    case 'review': live.review = ev; break;
+    case 'turn_end': curText = null; curThinking = null; refreshConversations(); if (ev.status === 'done') addSummary(); break;
     default:
   }
 }
@@ -113,6 +114,7 @@ function loadState(s) {
   fillSelectors();
   renderAuth();
   buildHome();
+  if (s.auth?.ready) maybeTour();
   const ss = s.session;
   Object.assign(live, {
     status: ss.status, steps: ss.steps || [], startedAt: ss.runStartedAt || 0, site: ss.site || '', takenOver: !!ss.takenOver,
@@ -191,7 +193,7 @@ function showRoute(r) {
 function setStatus(s) {
   const was = live.status;
   live.status = s;
-  if (busy(s) && !busy(was)) { live.startedAt = Date.now(); live.endedAt = 0; live.actions = []; live.runCost = 0; live.now = ''; }
+  if (busy(s) && !busy(was)) { live.startedAt = Date.now(); live.endedAt = 0; live.actions = []; live.runCost = 0; live.now = ''; live.review = null; }
   if (!busy(s) && busy(was)) { live.endedAt = Date.now(); live.takenOver = false; }
   if (s !== 'idle') live.lastStatus = s;
   const running = busy(s);
@@ -1125,6 +1127,83 @@ function pickRows(sc) {
     file, el('label', { class: 'check-row' }, fast, el('span', {}, t('fastRows'))))], 'btnStudio');
 }
 
+// The summary card when a task ends well: duration, steps, cost and the reviewer's verdict.
+function addSummary() {
+  const took = elapsed();
+  const total = live.steps.length;
+  if (took < 8000 && total < 2) return; // a quick answer needs no summary
+  const rv = live.review;
+  $('#messages').append(el('div', { class: 'card done-card' },
+    el('div', { class: 'row' }, el('span', { class: 'done-ic' }, ic('check', 18)), el('b', { class: 'grow' }, t('doneTitle')),
+      rv ? el('span', { class: `badge ${rv.verified ? 'ok' : 'warn'}`, title: rv.issue || '' }, rv.verified ? `✓ ${t('doneVerified')}` : t('doneUnverified')) : null),
+    el('div', { class: 'done-stats' },
+      el('span', {}, el('small', {}, t('duration')), el('b', {}, mmss(took))),
+      total ? el('span', {}, el('small', {}, t('wfSteps')), el('b', {}, `${doneCount()}/${total}`)) : null,
+      live.runCost > 0 ? el('span', {}, el('small', {}, t('cost')), el('b', {}, money(live.runCost, live.currency))) : null,
+      live.model ? el('span', {}, el('small', {}, t('modelUsed')), el('b', {}, shortModel(live.model))) : null),
+    el('div', { class: 'row' }, el('button', { class: 'btn small', onclick: openLive }, ic('eye'), t('details')), el('button', { class: 'btn small', onclick: exportResults }, ic('download'), t('exportResults')))));
+  scroll();
+}
+
+// The command palette (Ctrl+K): every action and saved workflow, searchable.
+function openPalette() {
+  if ($('#palette')) return;
+  const acts = [
+    { k: t('newChat'), i: 'plus', run: () => $('#btnNew').click() },
+    { k: t('liveTitle'), i: 'live', run: openLive },
+    { k: t('taskHistory'), i: 'history', run: () => $('#btnHistory').click() },
+    { k: t('studio'), i: 'workflow', run: () => openStudio('saved') },
+    { k: t('wfTemplates'), i: 'layers', run: () => openStudio('templates') },
+    { k: t('wfSchedules'), i: 'calendar', run: () => openStudio('schedules') },
+    { k: t('wfRecord'), i: 'record', run: () => openStudio('record') },
+    { k: t('usageTitle'), i: 'chart', run: openCosts },
+    { k: t('settings'), i: 'settings', run: () => call('open_settings') },
+    ...(state?.shortcuts || []).map((sc) => ({ k: `/${sc.command}`, sub: sc.description, i: sc.recorded?.length ? 'bolt' : 'workflow', run: () => send(`/${sc.command}`) })),
+    ...QUICK_TASKS.filter(([k]) => k !== 'saved').map(([k, i]) => ({ k: t(`qt_${k}`), i, run: () => prefill(t(`qt_${k}_p`)) })),
+  ];
+  const q = el('input', { type: 'search', placeholder: t('palette'), id: 'paletteInput' });
+  const list = el('div', { class: 'pal-list' });
+  let sel = 0;
+  let shown = acts;
+  const close = () => wrap.remove();
+  const go = (a) => { close(); closeViews(); a.run(); };
+  const paint = () => {
+    const v = q.value.trim().toLowerCase();
+    shown = acts.filter((a) => !v || `${a.k} ${a.sub || ''}`.toLowerCase().includes(v)).slice(0, 12);
+    sel = Math.min(sel, Math.max(0, shown.length - 1));
+    put(list, ...shown.map((a, i) => el('button', { class: `pal-item${i === sel ? ' on' : ''}`, onclick: () => go(a) }, ic(a.i, 16), el('span', { class: 'grow' }, a.k, a.sub ? el('small', { class: 'muted' }, ` · ${a.sub}`) : null))));
+  };
+  q.addEventListener('input', () => { sel = 0; paint(); });
+  q.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); sel = (sel + (e.key === 'ArrowDown' ? 1 : -1) + shown.length) % Math.max(1, shown.length); paint(); }
+    else if (e.key === 'Enter' && shown[sel]) { e.preventDefault(); go(shown[sel]); }
+    else if (e.key === 'Escape') close();
+  });
+  const wrap = el('div', { class: 'palette', id: 'palette', onclick: (e) => { if (e.target === wrap) close(); } }, el('div', { class: 'pal-box' }, q, list));
+  document.body.append(wrap);
+  paint();
+  q.focus();
+}
+document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); } });
+
+// A short welcome tour, once.
+function maybeTour() {
+  if ($('#tour')) return; // the state loads more than once when the panel opens
+  try { if (localStorage.getItem('tourDone') === '1') return; } catch { return; }
+  const steps = [['tour1t', 'tour1d', 'send'], ['tour2t', 'tour2d', 'hand'], ['tour3t', 'tour3d', 'bolt']];
+  let i = 0;
+  const box = el('div', { class: 'tour', id: 'tour' });
+  const paint = () => {
+    const [ti, de, icn] = steps[i];
+    put(box, el('div', { class: 'tour-card' },
+      el('span', { class: 'tour-ic' }, ic(icn, 26)), el('h3', {}, t(ti)), el('p', { class: 'muted' }, t(de)),
+      el('div', { class: 'tour-dots' }, ...steps.map((_, k) => el('i', { class: k === i ? 'on' : '' }))),
+      el('button', { class: 'btn primary block', id: 'tourNext', onclick: () => { if (++i >= steps.length) { try { localStorage.setItem('tourDone', '1'); } catch { /* private */ } box.remove(); } else paint(); } }, t(i === steps.length - 1 ? 'tourStart' : 'tourNext'))));
+  };
+  paint();
+  document.body.append(box);
+}
+
 // Learning by doing: offer to keep the task the agent just did as a fast workflow.
 function addLearned(ev) {
   const slug = String(ev.title || 'task').toLowerCase().normalize('NFKD').replace(/[^\w\u0600-\u06FF]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'task';
@@ -1398,6 +1477,6 @@ async function openMicSettings() {
 }
 
 // Old entry points kept for keyboard users and saved links.
-window.__inferaPanel = { openStudio, openLive, openCosts, parseCsv };
+window.__inferaPanel = { openStudio, openLive, openCosts, parseCsv, openPalette };
 
 connect();

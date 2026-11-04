@@ -1025,6 +1025,20 @@ const pageErrors = [];
 sp.on('pageerror', (e) => pageErrors.push(e.message));
 await sp.goto(`chrome-extension://${extId}/sidepanel/sidepanel.html`);
 await sp.waitForTimeout(800);
+// The welcome tour: three cards, once.
+const tourShown = await sp.locator('#tour').count();
+await sp.screenshot({ path: path.join(outDir, 'sidepanel-tour.png') });
+for (let i = 0; i < 3 && (await sp.locator('#tourNext').count()); i++) await sp.locator('#tourNext').click();
+check('welcome tour: shown once with three cards, then gone', tourShown === 1 && (await sp.locator('#tour').count()) === 0);
+// The command palette.
+await sp.keyboard.press('Control+k');
+await sp.waitForTimeout(150);
+await sp.locator('#paletteInput').fill('usage');
+await sp.screenshot({ path: path.join(outDir, 'sidepanel-palette.png') });
+await sp.keyboard.press('Enter');
+await sp.waitForSelector('#costTotal', { timeout: 5000 }).catch(() => {});
+check('command palette: Ctrl+K, search, Enter opens the action', (await sp.locator('#costTotal').count()) === 1 && (await sp.locator('#palette').count()) === 0);
+await sp.locator('#drawerClose').click();
 await sp.locator('#btnNew').click();
 await sp.waitForTimeout(400);
 await sp.screenshot({ path: path.join(outDir, 'sidepanel-empty.png') });
@@ -1087,6 +1101,21 @@ await sp.locator('#drawerBody .wf .btn.primary').first().click();
 await sp.waitForTimeout(200);
 check('workflow studio: a template opens in the editor', (await sp.locator('#wfSteps .wfe-step').count()) === 5);
 await sp.screenshot({ path: path.join(outDir, 'sidepanel-studio.png') });
+// A finished fast replay (in the panel's own session) ends with the summary card in the panel.
+const spWin = await sp.evaluate(async () => (await chrome.windows.getCurrent()).id);
+await sw.evaluate(async ({ tabId, spWin }) => {
+  const I = self.__infera;
+  const win = spWin;
+  // The page to work on, active in the panel's window (as it is beside a real side panel).
+  if ((await chrome.tabs.get(tabId)).windowId !== win) await chrome.tabs.move(tabId, { windowId: win, index: -1 });
+  await chrome.tabs.update(tabId, { active: true });
+  const sc = (await I.panelCall(win, { type: 'list_shortcuts' })).find((x) => x.command === 'order-form');
+  await I.panelCall(win, { type: 'replay_workflow', id: sc.id });
+}, { tabId, spWin });
+await sp.locator('#btnHome').click();
+await sp.waitForSelector('.done-card', { timeout: 20_000 }).catch(() => {});
+await sp.screenshot({ path: path.join(outDir, 'sidepanel-done.png') });
+check('summary card: a finished task shows its duration and steps', (await sp.locator('.done-card').count()) === 1 && /5\/5/.test(await sp.locator('.done-card').innerText().catch(() => '')), await sp.locator('.done-card').innerText().catch(() => 'none'));
 await sp.locator('#btnCosts').click();
 await sp.waitForSelector('.cost-stats', { timeout: 5000 }).catch(() => {});
 await sp.waitForTimeout(300);

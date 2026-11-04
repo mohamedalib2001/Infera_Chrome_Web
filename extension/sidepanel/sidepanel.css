@@ -306,3 +306,36 @@ dialog.capture::backdrop { background: rgba(0, 0, 0, .55); }
   .hcard .h-thumb, .hcard .h-ph { display: none; }
 }
 .learned { border-color: var(--brand-line); box-shadow: var(--glow); }
+
+/* Completion summary */
+.done-card { padding: 12px 14px; display: grid; gap: 10px; border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); background: linear-gradient(160deg, color-mix(in srgb, var(--ok) 10%, var(--surface)), var(--surface)); animation: rise .35s ease-out; }
+.done-ic { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--ok); color: #fff; box-shadow: 0 0 0 4px var(--ok-soft); }
+.done-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr)); gap: 8px; }
+.done-stats span { display: grid; gap: 1px; padding: 6px 8px; border-radius: 10px; background: var(--bg-2); }
+.done-stats small { font-size: 10.5px; color: var(--muted); }
+.done-stats b { font-size: 13px; font-variant-numeric: tabular-nums; }
+
+/* Command palette */
+.palette { position: fixed; inset: 0; z-index: 40; background: rgba(3, 6, 18, .55); backdrop-filter: blur(3px); display: grid; align-items: start; justify-items: center; padding-top: 70px; animation: fade .15s ease-out; }
+.pal-box { width: min(92vw, 420px); background: var(--surface); border: 1px solid var(--brand-line); border-radius: 14px; box-shadow: var(--glow), var(--shadow); overflow: hidden; animation: rise .2s ease-out; }
+.pal-box input { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 12px 14px; background: transparent; font-size: 14px; }
+.pal-box input:focus { outline: none; }
+.pal-list { max-height: 52vh; overflow: auto; padding: 6px; display: grid; gap: 2px; }
+.pal-item { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border: 0; border-radius: 9px; background: none; cursor: pointer; text-align: start; color: var(--text); }
+.pal-item .ic { color: var(--brand); flex: none; }
+.pal-item.on, .pal-item:hover { background: var(--brand-soft); }
+
+/* Welcome tour */
+.tour { position: fixed; inset: 0; z-index: 45; background: rgba(3, 6, 18, .7); backdrop-filter: blur(4px); display: grid; place-items: center; padding: 18px; animation: fade .2s ease-out; }
+.tour-card { width: min(100%, 340px); background: var(--surface); border: 1px solid var(--brand-line); border-radius: 18px; padding: 22px 18px 16px; display: grid; gap: 8px; justify-items: center; text-align: center; box-shadow: var(--glow), var(--shadow); animation: rise .3s ease-out; }
+.tour-ic { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center; color: #fff; background: var(--grad); box-shadow: 0 10px 30px rgba(76, 61, 255, .45); }
+.tour-card h3 { margin: 6px 0 0; font-size: 17px; }
+.tour-card p { margin: 0 0 6px; font-size: 13px; }
+.tour-dots { display: flex; gap: 6px; margin: 2px 0 6px; }
+.tour-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--surface-3); }
+.tour-dots i.on { width: 20px; border-radius: 4px; background: var(--grad); }
+
+/* Motion */
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+.msg, .tool, .approval, .banner, .card.item { animation: rise .25s ease-out; }
