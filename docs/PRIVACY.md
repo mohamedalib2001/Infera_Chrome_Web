@@ -44,6 +44,10 @@ you asked for or scheduled yourself.
 | Your voice, when you use voice control | Only while the microphone is on | To turn speech into the text of your request. It is recognised on your device when Chrome has the language; otherwise Chrome sends the audio to Google's speech service. Only the text reaches us | Contract (at your request) |
 | Security signals (refused actions, suspected prompt injection) | When they happen | Safety of the service and of your accounts | Legitimate interest |
 
+Screenshots sent to the model have password, card, one-time-code and ID fields painted over first.
+The activity log (each action, approval and replay step, with the site and result) stays on your device:
+it is never sent to us, holds the last 5,000 entries, and you can export or clear it in Settings.
+
 Memory never stores passwords, one-time codes, card numbers or keys: both the extension and our server
 refuse them. Very long tasks have their older steps summarised on the server so the task can continue,
 and that summary is saved with the conversation.

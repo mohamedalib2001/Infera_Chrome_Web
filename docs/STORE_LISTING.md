@@ -46,6 +46,9 @@ Safety first
 • Purchases, payments, account creation, card numbers and IDs are never handled by the agent
 • Downloads and sign-in approvals always ask you first
 • Page content is treated as untrusted data, and hidden text is removed to resist prompt-injection
+• Password, card, one-time-code and ID fields are painted over in every screenshot before it leaves your browser
+• A recorded workflow acts only on the sites it was recorded on
+• An activity log of every action and approval, kept on your device and exportable as CSV
 
 Works in Arabic and English (right to left), with dark, light and system themes.
 
@@ -75,6 +78,9 @@ Infera Agent is developed and operated by Infera Engine Ltd, registered in Engla
 • الوكيل لا يجري مشتريات أو مدفوعات ولا ينشئ حسابات ولا يتعامل مع أرقام البطاقات أو الهويات
 • التنزيلات وموافقات تسجيل الدخول تطلب إذنك دائمًا
 • محتوى الصفحات يُعامَل كبيانات غير موثوقة، والنصوص المخفية تُحذف لمقاومة حقن التعليمات
+• حقول كلمات المرور والبطاقات ورموز التحقق والهوية تُغطّى في كل لقطة شاشة قبل أن تغادر متصفحك
+• سير العمل المسجَّل لا يعمل إلا على المواقع التي سُجِّل عليها
+• سجل نشاط لكل إجراء وموافقة، محفوظ على جهازك وقابل للتصدير CSV
 
 يعمل بالعربية والإنجليزية، مع الوضع الفاتح والداكن.
 
