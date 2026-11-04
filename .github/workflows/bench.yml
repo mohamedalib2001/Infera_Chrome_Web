@@ -1,0 +1,38 @@
+# Nightly real-site benchmark: the real agent and model, through an Infera Agent account, on
+# the tasks in bench/tasks.json. Needs the INFERA_BENCH_TOKEN secret (an account access token,
+# see docs/BENCHMARK.md); each run is charged to that account. The run fails when the pass
+# rate falls below MIN_PASS_RATE, so a regression is seen the next morning.
+name: Real-site benchmark
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+    inputs:
+      mode: { description: 'Operating mode', required: false, default: 'auto' }
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: benchmark
+    env:
+      MIN_PASS_RATE: '0.8'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 22 }
+      - name: Install
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Run
+        env:
+          INFERA_TOKEN: ${{ secrets.INFERA_BENCH_TOKEN }}
+        run: |
+          if [ -z "$INFERA_TOKEN" ]; then echo "INFERA_BENCH_TOKEN is not set: skipping."; exit 0; fi
+          xvfb-run -a node scripts/bench.mjs --mode "${{ github.event.inputs.mode || 'auto' }}"
+          node -e "const fs=require('fs');const f=fs.readdirSync('bench').filter(x=>x.startsWith('results-')).sort().pop();const r=JSON.parse(fs.readFileSync('bench/'+f));const rate=r.passed/r.total;console.log('pass rate',rate.toFixed(2));if(rate<Number(process.env.MIN_PASS_RATE)){console.error('Below the minimum pass rate');process.exit(1)}"
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: bench-results
+          path: bench/results-*.json

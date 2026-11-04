@@ -31,3 +31,10 @@ refusing a payment.
 
 Compare modes (`--mode fast` vs `--mode power`) and versions by keeping the result files; a change to
 the agent should not ship if the pass rate drops.
+
+## Every night in GitHub
+
+`.github/workflows/bench.yml` runs the benchmark at 02:17 UTC and on demand (Actions → Real-site
+benchmark → Run workflow). Add the token as the secret `INFERA_BENCH_TOKEN` in a repository
+environment named `benchmark`. The run fails when the pass rate drops below 80% (`MIN_PASS_RATE`),
+and each run's report is kept as the `bench-results` artifact. Without the secret it skips itself.
