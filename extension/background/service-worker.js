@@ -337,6 +337,7 @@ async function replayInSession(s, sc, tabId, values = {}, { fallback = true } = 
   s.runStartedAt = Date.now();
   s.setStatus('running');
   s.emit({ type: 'steps', steps: s.steps });
+  s.emit({ type: 'replay' }); // no model is used
   s.emit({ type: 'info', message: ar ? `تشغيل سريع لـ /${sc.command}: ${plan.length} خطوة بدون الذكاء الاصطناعي.` : `Fast replay of /${sc.command}: ${plan.length} steps, without the model.` });
   const r = await replay(sc, {
     tabId, values, signal: s.abort.signal,

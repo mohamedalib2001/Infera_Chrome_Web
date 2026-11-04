@@ -91,6 +91,7 @@ function onEvent(ev) {
     case 'batch': renderBatch(ev); break;
     case 'learned': addLearned(ev); break;
     case 'review': live.review = ev; break;
+    case 'replay': live.model = ''; break;
     case 'turn_end': curText = null; curThinking = null; refreshConversations(); if (ev.status === 'done') addSummary(); break;
     default:
   }
