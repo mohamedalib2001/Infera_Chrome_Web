@@ -125,6 +125,12 @@ const server = http.createServer((req, res) => {
       const j = JSON.parse(body);
       requests.push({ headers: req.headers, body: j });
       const n = requests.length;
+      // The reviewer (a non-streaming helper call): its verdict is set by the test.
+      if (j.stream === false && /independent reviewer/.test(JSON.stringify(j.system || ''))) {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ id: 'rv', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn', usage: { input_tokens: 900, output_tokens: 20 },
+          content: [{ type: 'text', text: globalThis.REVIEW || '{"verified": true, "issue": ""}' }] }));
+      }
       if (j.stop_sequences) {
         // Quick Mode
         if (!j.messages.some((m) => m.role === 'assistant')) {
@@ -206,6 +212,23 @@ const server = http.createServer((req, res) => {
         return sse(res, [start('st3'),
           { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
           { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'All done. Verified: confirmation shown.' } },
+          { type: 'content_block_stop', index: 0 },
+          { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }]);
+      }
+      if (phase === 'review') {
+        // A planned task whose steps are all marked done, then the answer (and a second one after a review).
+        const k = j.messages.filter((m) => m.role === 'assistant').length;
+        const tu = (index, id, name, input) => [
+          { type: 'content_block_start', index, content_block: { type: 'tool_use', id, name, input: {} } },
+          { type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: JSON.stringify(input) } },
+          { type: 'content_block_stop', index },
+        ];
+        if (k === 0) return sse(res, [start('r1'), ...tu(0, 'r_p', 'task_steps', { action: 'plan', steps: ['Open', 'Fill', 'Submit'] }),
+          ...tu(1, 'r_1', 'task_steps', { action: 'done', step: 1 }), ...tu(2, 'r_2', 'task_steps', { action: 'done', step: 2 }), ...tu(3, 'r_3', 'task_steps', { action: 'done', step: 3, note: 'Submitted' }),
+          { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 10 } }, { type: 'message_stop' }]);
+        return sse(res, [start(`r${k + 1}`),
+          { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+          { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: k === 1 ? 'The order is submitted.' : 'Checked again: the confirmation is shown under the form.' } },
           { type: 'content_block_stop', index: 0 },
           { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }]);
       }
@@ -779,6 +802,28 @@ const g0 = JSON.stringify(requests[0]?.body.messages[0] || '');
 check('site guide: saved per site, a newer one replaces it, secrets refused', /Saved the guide for 127\.0\.0\.1/.test(guide.first.text) && /Updated the guide/.test(guide.second.text) && guide.secret.err && guide.guides === 1 && /tick I agree/.test(guide.read.text), JSON.stringify(guide));
 check('site guide: a long government host name keeps its guide', /Services > Recruitment/.test(guide.longRead.text), guide.longRead.text);
 check('site guide: handed to the agent when it opens the site, not in the general memory', /<site_guide host=.{1,2}127\.0\.0\.1/.test(g0) && /tick I agree/.test(g0) && !/user_memory[^<]*tick I agree/.test(g0), g0.slice(0, 300));
+phase = 'normal';
+
+// The reviewer: after a planned task, an independent model checks the answer against a fresh
+// screenshot; a problem it finds sends the agent back once, a confirmation is shown.
+phase = 'review';
+const runReviewed = (verdict) => { globalThis.REVIEW = verdict; return sw.evaluate(async ({ tabId }) => {
+  const I = self.__infera;
+  const s = new I.AgentSession({ kind: 'panel' });
+  s.classicTools = true;
+  s.modelOverride = 'claude-opus-5-5';
+  const infos = [];
+  s.subscribe((e) => { if (e.type === 'info') infos.push(e.message); });
+  await s.run('Submit the order', { startTabId: tabId });
+  return { status: s.status, infos, turns: s.messages.filter((m) => m.role === 'assistant').length, sent: JSON.stringify(s.messages.filter((m) => m.role === 'user').at(-1)?.content || '') };
+}, { tabId }); };
+requests.length = 0;
+const reviewBad = await runReviewed('{"verified": false, "issue": "No confirmation number is visible on the page"}');
+const badReqs = requests.map((r) => (r.body.stream === false ? 'review' : 'agent'));
+const reviewGood = await runReviewed('{"verified": true, "issue": ""}');
+globalThis.REVIEW = '';
+check('reviewer: a problem it finds on the page sends the agent back once to check it', reviewBad.status === 'done' && reviewBad.turns === 3 && /No confirmation number is visible/.test(reviewBad.sent) && /Reviewer found a problem/.test(reviewBad.infos.join(' ')) && badReqs.join() === 'agent,agent,review,agent', JSON.stringify({ ...reviewBad, badReqs }));
+check('reviewer: a confirmed result is shown and the task ends', reviewGood.status === 'done' && reviewGood.turns === 2 && /confirmed on the page/.test(reviewGood.infos.join(' ')), JSON.stringify(reviewGood));
 phase = 'normal';
 
 // Learning by doing: the steps the agent took become a workflow that fast replay runs again

@@ -19,6 +19,7 @@ const el = (tag, attrs = {}, ...kids) => {
 const L = {
   en: {
     about: 'About and legal', aboutHint: 'Infera Agent Web is published and operated by:', privacyPolicy: 'Privacy policy', terms: 'Terms of use', supportMail: 'Support', privacyMail: 'Privacy and data requests', ico: 'You can also complain to the UK Information Commissioner\'s Office (ico.org.uk).',
+    reviewerOn: 'Independent reviewer: after a task of several steps, a second model checks the result on the page before the task counts as done (one small extra charge per task)',
     remoteTasks: 'Run tasks I send from my Infera Agent account (app or phone) in this browser', teamRules: 'Your team ({orgs}) applies its rules here: {n} blocked sites.', teamCap: 'Daily limit: {cap}.', teamOff: 'The team has turned the browser agent off.', fromApp: 'from the app',
     modelsTitle: 'Models & performance', modelsHint: 'Choose how much power the agent uses. An operating mode picks the model and thinking effort for each new task; or choose one model for every task.', chooseModel: 'Or choose a model',
     subtitle: 'Settings, permissions and connections', account: 'Infera Agent account', accountHint: 'Sign in with your INFERA Agent account on inferaagent.com. Model requests go through INFERA Agent and are paid from your credits, so no API key is stored in the browser. An INFERA Agent account is required to use the extension.',
@@ -47,7 +48,7 @@ const L = {
     about: 'عن الإضافة والمعلومات القانونية', aboutHint: 'تنشر إضافة Infera Agent Web وتشغّلها:', privacyPolicy: 'سياسة الخصوصية', terms: 'شروط الاستخدام', supportMail: 'الدعم', privacyMail: 'الخصوصية وطلبات البيانات', ico: 'ويحق لك أيضًا تقديم شكوى إلى مكتب مفوّض المعلومات في المملكة المتحدة (ico.org.uk).',
     remoteTasks: 'نفّذ في هذا المتصفح المهام التي أرسلها من حسابي على إنفرا إيجنت (التطبيق أو الهاتف)', teamRules: 'يطبّق فريقك ({orgs}) قواعده هنا: {n} موقعًا محظورًا.', teamCap: 'الحد اليومي: {cap}.', teamOff: 'أوقف الفريق وكيل المتصفح.', fromApp: 'من التطبيق',
     modelsTitle: 'النماذج والأداء', modelsHint: 'اختر مقدار القوة التي يستخدمها الوكيل. وضع التشغيل يختار النموذج ومستوى التفكير لكل مهمة جديدة، أو اختر نموذجًا واحدًا لكل المهام.', chooseModel: 'أو اختر نموذجًا',
-    subtitle: 'الإعدادات والأذونات والاتصالات', account: 'حساب إنفرا إيجنت', accountHint: 'سجّل الدخول بحسابك على inferaagent.com. تمرّ طلبات النموذج عبر إنفرا إيجنت وتُخصم من رصيدك، فلا يُخزَّن أي مفتاح API في المتصفح. استخدام الإضافة يتطلب حسابًا على إنفرا إيجنت.',
+    reviewerOn: 'مراجِع مستقل: بعد كل مهمة من عدة خطوات يتحقق نموذج ثانٍ من النتيجة على الصفحة قبل اعتبارها منجزة (تكلفة إضافية صغيرة لكل مهمة)', subtitle: 'الإعدادات والأذونات والاتصالات', account: 'حساب إنفرا إيجنت', accountHint: 'سجّل الدخول بحسابك على inferaagent.com. تمرّ طلبات النموذج عبر إنفرا إيجنت وتُخصم من رصيدك، فلا يُخزَّن أي مفتاح API في المتصفح. استخدام الإضافة يتطلب حسابًا على إنفرا إيجنت.',
     signIn: 'تسجيل الدخول', signOut: 'تسجيل الخروج', signedIn: 'تم تسجيل الدخول', notSignedIn: 'لم يتم تسجيل الدخول',
     behaviour: 'سلوك الوكيل', behaviourHint: 'الإعدادات الافتراضية للمهام الجديدة، ويمكن تغيير النموذج ووضع الموافقة من اللوحة الجانبية أيضًا.',
     model: 'النموذج الافتراضي', effort: 'مستوى الجهد', mode: 'وضع الموافقة', safety: 'فاحص أمان مستقل لكل إجراء (في وضع الموافقة التلقائية)', language: 'لغة الواجهة',
@@ -158,13 +159,14 @@ async function render() {
   const tabsAll = el('input', { type: 'checkbox', checked: s.allTabsAccess !== false ? true : undefined });
   const sync = el('input', { type: 'checkbox', checked: s.syncHistory !== false ? true : undefined });
   const remote = el('input', { type: 'checkbox', checked: s.remoteTasks !== false ? true : undefined });
+  const reviewer = el('input', { type: 'checkbox', checked: s.reviewer !== false ? true : undefined });
   const savedB = el('span', { class: 'saved' });
   app.append(el('section', { class: 'card', id: 'behaviour' },
     el('h2', {}, tr('behaviour')), el('p', { class: 'muted' }, tr('behaviourHint')),
     el('div', { class: 'fields' }, field(tr('model'), model), field(tr('effort'), effort), field(tr('mode'), mode), field(tr('language'), lang)),
-    el('div', { style: 'display:grid;gap:8px;margin-top:12px' }, check(tr('safety'), safety), check(tr('notif'), notif), check(tr('sound'), sound), check(tr('web'), web), check(tr('memoryOn'), mem), check(tr('allTabs'), tabsAll), check(tr('sync'), sync), check(tr('remoteTasks'), remote)),
+    el('div', { style: 'display:grid;gap:8px;margin-top:12px' }, check(tr('safety'), safety), check(tr('notif'), notif), check(tr('sound'), sound), check(tr('web'), web), check(tr('memoryOn'), mem), check(tr('allTabs'), tabsAll), check(tr('sync'), sync), check(tr('remoteTasks'), remote), check(tr('reviewerOn'), reviewer)),
     el('div', { class: 'actions' }, el('button', { class: 'btn primary', onclick: async () => {
-      await send('update_settings', { patch: { ...(model.value !== s.model ? { model: model.value, operatingMode: 'manual' } : {}), effort: effort.value, permissionMode: mode.value, language: lang.value, safetyChecker: safety.checked, notifications: notif.checked, sound: sound.checked, webResearch: web.checked, memory: mem.checked, allTabsAccess: tabsAll.checked, syncHistory: sync.checked, remoteTasks: remote.checked } });
+      await send('update_settings', { patch: { ...(model.value !== s.model ? { model: model.value, operatingMode: 'manual' } : {}), effort: effort.value, permissionMode: mode.value, language: lang.value, safetyChecker: safety.checked, notifications: notif.checked, sound: sound.checked, webResearch: web.checked, memory: mem.checked, allTabsAccess: tabsAll.checked, syncHistory: sync.checked, remoteTasks: remote.checked, reviewer: reviewer.checked } });
       savedB.textContent = tr('saved');
       if (lang.value !== s.language) render();
     } }, tr('save')), savedB)));
