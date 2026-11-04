@@ -41,6 +41,7 @@ you asked for or scheduled yourself.
 | Long-term memory (up to 2,000 items you asked the agent to remember) | When you or the agent save one | To use your preferences in later tasks | Contract (at your request) |
 | Tasks you send from your account to this browser (the request, start page, status and final answer) | When you send one from the app or a phone | To run it in your browser and show you the result | Contract (at your request) |
 | Your team's browser-agent rules (on/off, blocked sites, daily limit), when you work in someone's team | Every 15 minutes | To apply the rules the account owner set | Legitimate interest (the account owner's) |
+| Your voice, when you use voice control | Only while the microphone is on | To turn speech into the text of your request. It is recognised on your device when Chrome has the language; otherwise Chrome sends the audio to Google's speech service. Only the text reaches us | Contract (at your request) |
 | Security signals (refused actions, suspected prompt injection) | When they happen | Safety of the service and of your accounts | Legitimate interest |
 
 Memory never stores passwords, one-time codes, card numbers or keys: both the extension and our server

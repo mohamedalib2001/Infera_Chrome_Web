@@ -93,7 +93,9 @@ body { height: 100vh; overflow: hidden; background: radial-gradient(120% 60% at 
 .file-chip { margin-top: 6px; font-size: 12px; opacity: .85; }
 
 /* Home */
-.home { position: absolute; inset: 58px 0 128px; overflow-y: auto; padding: 18px 16px 12px; display: flex; flex-direction: column; gap: 14px; }
+/* In the column's flow (not on top of it), so it scrolls to its last line whatever the composer's height. */
+.home { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 16px 16px; display: flex; flex-direction: column; gap: 14px; }
+.home > * { flex: none; }
 .hero { text-align: center; display: grid; justify-items: center; gap: 4px; }
 .hero-logo { width: 64px; height: 64px; filter: drop-shadow(0 10px 26px rgba(106, 123, 255, .5)); }
 .hero h2 { margin: 6px 0 0; font-size: 18px; line-height: 1.35; }
@@ -339,3 +341,8 @@ dialog.capture::backdrop { background: rgba(0, 0, 0, .55); }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 .msg, .tool, .approval, .banner, .card.item { animation: rise .25s ease-out; }
+
+/* Voice */
+.mic-btn.listening { color: #fff; background: var(--danger); animation: mic-pulse 1.2s infinite; border-radius: 50%; }
+.mic-btn.speaking { color: var(--brand); background: var(--brand-soft); border-radius: 50%; }
+@keyframes mic-pulse { 0% { box-shadow: 0 0 0 0 rgba(255, 92, 122, .55); } 100% { box-shadow: 0 0 0 10px rgba(255, 92, 122, 0); } }

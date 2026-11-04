@@ -12,6 +12,9 @@ export const DEFAULT_SETTINGS = {
   safetyChecker: true,
   language: 'auto',
   theme: 'dark',       // dark | light | auto (follow the system)
+  voiceReplies: false,   // read answers and approval requests aloud
+  voiceHandsFree: false, // listen again after each spoken reply
+  voiceAutoSend: true,   // send a dictated request as soon as you stop speaking
   notifications: true,
   sound: true,
   userBlocklist: [],

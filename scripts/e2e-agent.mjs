@@ -1053,6 +1053,14 @@ const own = await sw.evaluate(async () => (await self.__infera.buildFile({ forma
 const ownRows = await sp.evaluate(async (b64) => { const { readXlsx } = await import('../lib/xlsx-read.js'); return readXlsx(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer); }, own);
 check('excel input: reads a real workbook (deflate, shared/rich/inline strings, booleans, gaps, any sheet)', JSON.stringify(xl.rows) === JSON.stringify([{ name: 'Omar Ali', national_id: '1012345678', paid: 'TRUE' }, { name: 'سارة', national_id: '', paid: 'FALSE' }]), JSON.stringify(xl.rows));
 check('excel input: reads the extension\'s own Excel export', JSON.stringify(ownRows) === JSON.stringify([['city', 'n'], ['Riyadh', '3']]), JSON.stringify(ownRows));
+// Nothing hides under the composer: scrolled to the end, the home screen's last line sits above it.
+await sp.setViewportSize({ width: 400, height: 560 });
+await sp.locator('#empty').evaluate((e) => { e.scrollTop = e.scrollHeight; });
+await sp.waitForTimeout(100);
+const fit = await sp.evaluate(() => { const last = [...document.querySelectorAll('#empty > :not([hidden])')].pop().getBoundingClientRect(); const comp = document.querySelector('.composer').getBoundingClientRect(); return { lastBottom: Math.round(last.bottom), composerTop: Math.round(comp.top) }; });
+await sp.screenshot({ path: path.join(outDir, 'sidepanel-home-bottom.png') });
+check('home: scrolled to the end, its last line is above the composer (nothing hidden)', fit.lastBottom <= fit.composerTop, JSON.stringify(fit));
+await sp.setViewportSize({ width: 420, height: 800 });
 check('home: quick actions and quick tasks', (await sp.locator('#examples .qa').count()) === 9 && (await sp.locator('#quickTasks .qt').count()) === 6);
 await sp.locator('#examples .qa[data-qa="extract"]').click();
 check('home: a quick action prefills the request', /table|الجدول/.test(await sp.locator('#input').inputValue()));
@@ -1168,6 +1176,52 @@ const starts = await mic.evaluate(() => globalThis.__starts);
 check('microphone refused: one settings tab, no restart loop', micTabs === 1 && starts === 1, `tabs=${micTabs} starts=${starts}`);
 for (const pg of ctx.pages()) if (pg.url().includes('options/options.html')) await pg.close();
 await mic.close();
+// Voice control, with a simulated microphone and speaker: dictation sends a request, a spoken
+// reply is read out, hands-free listens again, and short phrases are commands.
+const vp = await ctx.newPage();
+await vp.addInitScript(() => {
+  globalThis.__said = [];
+  globalThis.__starts = 0;
+  globalThis.__spoken = [];
+  class FakeSR {
+    start() {
+      globalThis.__starts++;
+      const said = globalThis.__said.shift();
+      setTimeout(() => {
+        if (said) this.onresult?.({ resultIndex: 0, results: [Object.assign([{ transcript: said }], { isFinal: true })] });
+        this.onend?.();
+      }, 30);
+    }
+    stop() {} abort() {}
+  }
+  globalThis.webkitSpeechRecognition = FakeSR;
+  globalThis.SpeechRecognition = FakeSR;
+  Object.defineProperty(window, 'speechSynthesis', { value: { speaking: false, speak(u) { globalThis.__spoken.push(u.text); setTimeout(() => u.onend?.(), 20); }, cancel() {}, getVoices: () => [] } });
+});
+phase = 'plain';
+await sw.evaluate(() => self.__infera.updateSettings({ voiceReplies: true, voiceHandsFree: true, voiceAutoSend: true, language: 'en' }));
+await vp.goto(`chrome-extension://${extId}/sidepanel/sidepanel.html`);
+await vp.waitForTimeout(800);
+const cmds = await vp.evaluate(async (u) => {
+  const { matchCommand, speakable } = await import(u);
+  return { list: ['توقف', 'إيقاف مؤقت', 'كمّل', 'خليني', 'ارجع للوكيل', 'نعم', 'لا', 'مهمة جديدة', 'Stop.', 'take over', 'yes', 'open gmail and read my last email', 'افتح موقع وزارة العمل'].map((x) => matchCommand(x)), sp: speakable('# Result\n**Done.** See [the page](https://x.example) and `code`.\n```js\nx\n```') };
+}, `chrome-extension://${extId}/sidepanel/voice.js`);
+check('voice commands: Arabic and English phrases map to actions; requests do not', JSON.stringify(cmds.list) === JSON.stringify(['stop', 'pause', 'resume', 'takeOver', 'giveBack', 'approve', 'decline', 'newTask', 'stop', 'takeOver', 'approve', null, null]) && cmds.sp === 'Result Done. See the page and code.', JSON.stringify(cmds));
+requests.length = 0;
+await vp.evaluate(() => { globalThis.__said.push('What is on this page?'); });
+await vp.locator('#btnMic').click();
+await vp.waitForTimeout(2500);
+const voiceRun = await vp.evaluate(() => ({ user: [...document.querySelectorAll('.msg.user')].map((m) => m.innerText).pop(), spoken: globalThis.__spoken.slice(), starts: globalThis.__starts }));
+check('voice: a dictated request is sent, the answer is read aloud, and hands-free listens again', voiceRun.user === 'What is on this page?' && requests.length >= 1 && voiceRun.spoken.some((x) => /Hello again/.test(x)) && voiceRun.starts >= 2, JSON.stringify(voiceRun));
+const reqBefore = requests.length;
+await vp.evaluate(() => { globalThis.__said.push('مهمة جديدة'); });
+await vp.locator('#btnMic').click();
+await vp.waitForTimeout(800);
+check('voice: "new task" is a command, not a request', (await vp.locator('.msg.user').count()) === 0 && (await vp.locator('#empty').isVisible()) && requests.length === reqBefore, String(await vp.locator('.msg.user').count()));
+await sw.evaluate(() => self.__infera.updateSettings({ voiceReplies: false, voiceHandsFree: false, language: 'auto' }));
+await vp.close();
+phase = 'normal';
+
 // A long task: the history is summarized on the server, the notebook comes back
 // word for word, and only the summary onward is sent.
 requests.length = 0;

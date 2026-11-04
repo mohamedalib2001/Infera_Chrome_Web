@@ -5,6 +5,7 @@ import { t, setLanguage, applyI18n, MODE_LABEL, currentLang } from '../lib/i18n.
 import { renderMarkdown } from '../lib/markdown.js';
 import { icon } from '../lib/icons.js';
 import { readXlsx, rowsToObjects } from '../lib/xlsx-read.js';
+import { Voice, matchCommand, speakable } from './voice.js';
 
 const $ = (s) => document.querySelector(s);
 const el = (tag, attrs = {}, ...kids) => {
@@ -92,7 +93,7 @@ function onEvent(ev) {
     case 'learned': addLearned(ev); break;
     case 'review': live.review = ev; break;
     case 'replay': live.model = ''; break;
-    case 'turn_end': curText = null; curThinking = null; refreshConversations(); if (ev.status === 'done') addSummary(); break;
+    case 'turn_end': curText = null; curThinking = null; refreshConversations(); if (ev.status === 'done') addSummary(); setTimeout(() => voiceAfterTurn(ev.status), 150); break; // after the answer has rendered
     default:
   }
 }
@@ -208,7 +209,9 @@ function setStatus(s) {
 }
 
 function updateEmpty() {
-  $('#empty').hidden = $('#messages').children.length > 0;
+  const empty = $('#messages').children.length === 0;
+  $('#empty').hidden = !empty;
+  $('#messages').hidden = empty; // the home screen takes the space instead
 }
 
 // ---------------- rendering ----------------
@@ -437,6 +440,7 @@ function addApproval(r) {
   scroll();
   closeViews(); // an approval needs the person's eyes on the conversation
   box.querySelector('.btn.primary').focus();
+  voiceSay(`${t('voiceApproval')}: ${budget ? t('budgetTitle') : r.description || ''}. ${t('voiceSay')}`);
 }
 
 function addPlan(r) {
@@ -483,7 +487,7 @@ let tick = null;
 function refreshLive() {
   // The strip above the conversation while a task runs.
   const strip = $('#liveStrip');
-  const show = busy() && !$('#messages').hidden;
+  const show = busy();
   strip.hidden = !show;
   strip.classList.toggle('paused', live.status === 'paused');
   const dot = $('#btnLive .dot');
@@ -1158,6 +1162,7 @@ function openPalette() {
     { k: t('wfSchedules'), i: 'calendar', run: () => openStudio('schedules') },
     { k: t('wfRecord'), i: 'record', run: () => openStudio('record') },
     { k: t('usageTitle'), i: 'chart', run: openCosts },
+    { k: t('voiceListen'), i: 'mic', run: () => voice.listen() },
     { k: t('settings'), i: 'settings', run: () => call('open_settings') },
     ...(state?.shortcuts || []).map((sc) => ({ k: `/${sc.command}`, sub: sc.description, i: sc.recorded?.length ? 'bolt' : 'workflow', run: () => send(`/${sc.command}`) })),
     ...QUICK_TASKS.filter(([k]) => k !== 'saved').map(([k, i]) => ({ k: t(`qt_${k}`), i, run: () => prefill(t(`qt_${k}_p`)) })),
@@ -1477,7 +1482,61 @@ async function openMicSettings() {
   }
 }
 
+// ---------------- voice ----------------
+const vset = () => state?.settings || {};
+const voice = new Voice({
+  lang: currentLang(),
+  onInterim: (txt) => { input.value = txt; autosize(); },
+  onFinal: (txt) => onVoice(txt),
+  onState: (st) => { const b = $('#btnMic'); b.classList.toggle('listening', st === 'listening'); b.classList.toggle('speaking', st === 'speaking'); },
+  onError: (err) => {
+    if (err === 'unsupported') addBanner(t('voiceUnsupported'));
+    else if (['not-allowed', 'service-not-allowed', 'audio-capture'].includes(err)) { addBanner(t('micDenied')); if (err !== 'audio-capture') openMicSettings(); }
+  },
+});
+
+function onVoice(txt) {
+  const cmd = matchCommand(txt);
+  const pending = [...document.querySelectorAll('.approval:not(.done)')].pop();
+  const act = {
+    stop: () => busy() && call('stop'),
+    pause: () => busy() && live.status !== 'paused' && call('pause'),
+    resume: () => (live.status === 'paused' ? call('resume') : null),
+    takeOver: () => busy() && call('take_over'),
+    giveBack: () => (live.takenOver || live.status === 'paused' ? call('resume') : null),
+    approve: () => (pending ? pending.querySelector('.btn.primary')?.click() || true : null),
+    decline: () => (pending ? pending.querySelector('.btn.danger')?.click() || true : null),
+    newTask: () => { $('#btnNew').click(); return true; },
+  }[cmd];
+  const r = act ? act() : null;
+  if (cmd && r !== null && r !== false && r !== undefined) {
+    input.value = '';
+    autosize();
+    if (cmd !== 'newTask') addBanner(t('voiceDid', { cmd: t(`vc_${cmd}`) }), true); // a new task clears the conversation anyway
+    return;
+  }
+  // Not a command (or nothing to act on): a request, or an instruction to the running task.
+  if (vset().voiceAutoSend !== false) send(txt);
+  else { input.value = txt; autosize(); input.focus(); }
+}
+
+function voiceSay(textToSay, { listenAfter = true } = {}) {
+  if (!vset().voiceReplies) return;
+  voice.setLang(currentLang());
+  voice.speak(speakable(textToSay), { then: () => { if (listenAfter && vset().voiceHandsFree) voice.listen(); } });
+}
+
+function voiceAfterTurn(status) {
+  if (!vset().voiceReplies) return;
+  const last = [...$('#messages').querySelectorAll('.msg.assistant')].pop();
+  if (status === 'done' && last) voiceSay(last.innerText);
+  else if (status === 'error') voiceSay(t('error'));
+}
+
+$('#btnMic').addEventListener('click', () => { voice.setLang(currentLang()); voice.toggle(); });
+document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === 'Space') { e.preventDefault(); voice.setLang(currentLang()); voice.toggle(); } });
+
 // Old entry points kept for keyboard users and saved links.
-window.__inferaPanel = { openStudio, openLive, openCosts, parseCsv, openPalette };
+window.__inferaPanel = { openStudio, openLive, openCosts, parseCsv, openPalette, voice };
 
 connect();
